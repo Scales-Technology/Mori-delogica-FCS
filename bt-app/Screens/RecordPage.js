@@ -33,7 +33,7 @@ import data from "../store/dummyData";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const RecordPage = ({ route, navigation }) => {
-  const {category,  awbnumber, shipper } = route.params;
+  const {category, awbnumber, shipper, paymentInfo, senderDetails, receiverDetails } = route.params;
   const dispatch = useDispatch();
   const collections = useSelector((state) => state.settings.collections);
   const suppliers = useSelector((state) => state.settings.suppliers);
@@ -61,10 +61,12 @@ const RecordPage = ({ route, navigation }) => {
   const [totalVolume, setTotalVolume] = useState(null);
   const [pmcnumber, setPmcNumber] = useState(null);
   const [userDetails, setUserDetails] = useState(null);
-
+  // Extract payment status from the navigation params
+  const [paymentStatus, setPaymentStatus] = useState(paymentInfo?.status || "Unpaid");
+  const [senderInfoVisible, setSenderInfoVisible] = useState(false);
+  const [receiverInfoVisible, setReceiverInfoVisible] = useState(false);
 
 const bottomSheetModalRef = useRef(null);
-
 
 useEffect(() => {
   const fetchUserDetails = async () => {
@@ -109,6 +111,14 @@ useEffect(() => {
 
 const addtareWeight = ()=>{
   setDolleyVisible(true);
+}
+
+const toggleSenderInfo = () => {
+  setSenderInfoVisible(!senderInfoVisible);
+}
+
+const toggleReceiverInfo = () => {
+  setReceiverInfoVisible(!receiverInfoVisible);
 }
 
   const {
@@ -209,32 +219,35 @@ const handleSwitchBt = async () => {
     console.log("Printer: ", printer);
   };
 
-  const saveDataLocally = async () => {
-    const record = {
-      selectedSupplier,
-      category,
-      awbnumber,
-      selectedProductType,
-      shipper,
-      products,
-      netWeight,
-      totalWeight,
-      tareWeight,
-      createdAt: new Date(),
-    };
-
-    try {
-      const existingRecords = await AsyncStorage.getItem('localRecords');
-      const records = existingRecords ? JSON.parse(existingRecords) : [];
-      records.push(record);
-      await AsyncStorage.setItem('localRecords', JSON.stringify(records));
-      ToastAndroid.show("Record saved locally!", ToastAndroid.LONG);
-      setModalVisible(true);
-      // Reset Data
-    } catch (error) {
-      alert("Error saving record locally: " + error.message);
-    }
+const saveDataLocally = async () => {
+  const record = {
+    selectedSupplier,
+    category,
+    awbnumber,
+    selectedProductType,
+    shipper,
+    products,
+    netWeight,
+    totalWeight,
+    tareWeight,
+    paymentStatus,
+    senderDetails, // Add sender details to the record
+    receiverDetails, // Add receiver details to the record
+    createdAt: new Date(),
   };
+
+  try {
+    const existingRecords = await AsyncStorage.getItem('localRecords');
+    const records = existingRecords ? JSON.parse(existingRecords) : [];
+    records.push(record);
+    await AsyncStorage.setItem('localRecords', JSON.stringify(records));
+    ToastAndroid.show("Record saved locally!", ToastAndroid.LONG);
+    setModalVisible(true);
+    // Reset Data
+  } catch (error) {
+    alert("Error saving record locally: " + error.message);
+  }
+};
 
   const saveData = async () => {
     console.log("test", category);
@@ -273,16 +286,22 @@ const showPrinterReceipt = async () => {
         const items = products || [];
         const separator = "----------------------\n";
         const pmcNumber = pmcnumber || "";
+        const payment = paymentStatus || "Unpaid";
+        const sender = senderDetails?.name || "Unknown";
+        const receiver = receiverDetails?.name || "Unknown";
         // const userDt = userDetails.Name || "Unknown"
 
         // Initialize receipt data
         let receiptData = "";
         receiptData += "    ====== SCALESTECH =====\n\n";
-         receiptData += ` Category: ${supplier.padEnd(10, ' ')}\n`;
-         receiptData += ` ULD Number: ${pmcNumber.padEnd(10, ' ')}\n`;
+        receiptData += ` Category: ${supplier.padEnd(10, ' ')}\n`;
+        receiptData += ` ULD Number: ${pmcNumber.padEnd(10, ' ')}\n`;
         receiptData += ` AWB: ${airweighbillnumber.padEnd(10, ' ')}\n`;
         receiptData += ` Destination: ${destinationLocation.padEnd(10, ' ')}\n`;
-        receiptData += ` Shipper: ${ship.padEnd(10, '' )} \n`
+        receiptData += ` Shipper: ${ship.padEnd(10, '' )} \n`;
+        receiptData += ` Sender: ${sender.padEnd(10, ' ')} \n`;
+        receiptData += ` Receiver: ${receiver.padEnd(10, ' ')} \n`;
+        receiptData += ` Payment: ${payment.padEnd(10, ' ')} \n`;
         // receiptData += `  Printed by: ${userDt.padEnd(10, ' ')}\n`;
         receiptData += ` Date:${new Date().toLocaleDateString().padEnd(9, ' ')} Time:${new Date().toLocaleTimeString()}\n\n`;
 
@@ -295,7 +314,7 @@ const showPrinterReceipt = async () => {
         let totalVol = 0;
 
         items.forEach((item) => {
-            const { label = item.productType || "Unknown", quantity = 0, weight = 0, price = 0, lt = 0, wd =0,ht=0, tVol= 0 } = item;
+            const { label = item.productType || "Unknown", quantity = 0, weight = 0, price = 0, lt = 0, wd =0, ht=0, tVol= 0 } = item;
             // const pName = productName;
             const qty = parseInt(quantity, 10);
             const wgt = parseFloat(weight);
@@ -314,8 +333,8 @@ const showPrinterReceipt = async () => {
         receiptData += separator;
         // receiptData += `GW:    ${totalQuantity.toString().padStart(4, ' ')}   ${totalWeight.toFixed(2).padStart(8, ' ')} Kg    ${totalVol.toFixed(2).padStart(12, ' ')} cm3  \n\n`;
         receiptData += `GW:    ${totalQuantity.toString().padStart(4, ' ')}   ${totalWeight.toFixed(2).padStart(8, ' ')} Kg    \n\n`;
-        receiptData += `Tare Weight: ${tareweight.toString().padStart(6, '') } Kg \n`
-        receiptData += `Net Weight: ${netweight.toString().padStart(6, '')} Kg \n\n\n\n`
+        receiptData += `Tare Weight: ${tareweight.toString().padStart(6, '') } Kg \n`;
+        receiptData += `Net Weight: ${netweight.toString().padStart(6, '')} Kg \n\n\n\n`;
         receiptData += "   Thank you for your business!\n";
         receiptData += "   ===========================\n";
         receiptData += "\n\n\n"; // Extra lines for printer feed
@@ -365,14 +384,59 @@ return (
   <ScrollView style={{ flex: 1, backgroundColor: "#F9F9F9" }}>
     <View style={styles.container}>
      
+      {/* Display payment status */}
+      <View style={styles.paymentStatusContainer}>
+        <Text style={styles.paymentStatusText}>Payment Status: {paymentStatus}</Text>
+      </View>
 
-    <TextInput
+      {/* Sender Info Toggle Button */}
+      <TouchableOpacity 
+        style={styles.infoToggleButton} 
+        onPress={toggleSenderInfo}
+      >
+        <Text style={styles.infoToggleText}>
+          {senderInfoVisible ? "Hide Sender Info" : "Show Sender Info"}
+        </Text>
+      </TouchableOpacity>
+
+      {/* Sender Info Display */}
+      {senderInfoVisible && (
+        <View style={styles.infoContainer}>
+          <Text style={styles.infoTitle}>Sender Information</Text>
+          <Text style={styles.infoText}>Name: {senderDetails?.name || "N/A"}</Text>
+          <Text style={styles.infoText}>Phone: {senderDetails?.phone || "N/A"}</Text>
+          <Text style={styles.infoText}>ID Number: {senderDetails?.idNumber || "N/A"}</Text>
+          <Text style={styles.infoText}>Staff: {senderDetails?.staffName || "N/A"}</Text>
+        </View>
+      )}
+
+      {/* Receiver Info Toggle Button */}
+      <TouchableOpacity 
+        style={styles.infoToggleButton} 
+        onPress={toggleReceiverInfo}
+      >
+        <Text style={styles.infoToggleText}>
+          {receiverInfoVisible ? "Hide Receiver Info" : "Show Receiver Info"}
+        </Text>
+      </TouchableOpacity>
+
+      {/* Receiver Info Display */}
+      {receiverInfoVisible && (
+        <View style={styles.infoContainer}>
+          <Text style={styles.infoTitle}>Receiver Information</Text>
+          <Text style={styles.infoText}>Name: {receiverDetails?.name || "N/A"}</Text>
+          <Text style={styles.infoText}>Phone: {receiverDetails?.phone || "N/A"}</Text>
+          <Text style={styles.infoText}>ID Number: {receiverDetails?.idNumber || "N/A"}</Text>
+        </View>
+      )}
+
+      <TextInput
         value={selectedProductType}
         onChangeText={(text) => setSelectedProductType(text)}
         placeholder="Product Type"
         style={styles.supplier}
       />
-    <TextInput
+      <TextInput
         value={destination}
         onChangeText={(text) => setDestination(text)}
         placeholder="Destination"
@@ -598,6 +662,53 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     backgroundColor: "#F9F9F9",
   },
+  paymentStatusContainer: {
+    backgroundColor: "#f0f0f0",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginBottom: 15,
+    width: screenWidth * 0.8,
+    alignItems: "center",
+  },
+  paymentStatusText: {
+    fontSize: 16,
+    fontFamily: "Poppins-Medium",
+    color: "#333",
+  },
+  infoToggleButton: {
+    backgroundColor: "#E0E0E0",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginBottom: 10,
+    width: screenWidth * 0.8,
+    alignItems: "center",
+  },
+  infoToggleText: {
+    fontSize: 14,
+    fontFamily: "Poppins-Medium",
+    color: "#333",
+  },
+  infoContainer: {
+    backgroundColor: "#F2F2F2",
+    padding: 16,
+    borderRadius: 10,
+    marginBottom: 15,
+    width: screenWidth * 0.8,
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontFamily: "Poppins-Bold",
+    color: "#333",
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 14,
+    fontFamily: "Poppins-Regular",
+    color: "#333",
+    marginBottom: 4,
+  },
   display: {
     height: 100,
     width: screenWidth * 0.9,
@@ -770,4 +881,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default RecordPage;
+export default RecordPage;

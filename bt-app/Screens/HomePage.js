@@ -33,8 +33,16 @@ const HomePage = () => {
   const [senderIDNo, setSenderIDNo] = useState("");
   const [staffName, setStaffName] = useState("");
 
+  // Receiver Details
+  const [receiverName, setReceiverName] = useState("");
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [receiverIDNo, setReceiverIDNo] = useState("");
+
   // Product Details
   const [productName, setProductName] = useState("");
+
+  // Payment Status - set default value
+  const [paymentStatus, setPaymentStatus] = useState("Unpaid");
 
   const pushRecordsToFirebase = async () => {
     try {
@@ -55,7 +63,12 @@ const HomePage = () => {
             onPress: async () => {
               try {
                 for (const record of records) {
-                  await addDoc(collection(db, 'records'), record);
+                  // Ensure each record includes the payment status before uploading
+                  const recordWithPayment = {
+                    ...record,
+                    paymentStatus: record.paymentStatus || paymentStatus
+                  };
+                  await addDoc(collection(db, 'records'), recordWithPayment);
                 }
                 await AsyncStorage.removeItem('localRecords');
                 ToastAndroid.show('Records pushed to Firebase successfully!', ToastAndroid.LONG);
@@ -81,8 +94,16 @@ const HomePage = () => {
         idNumber: senderIDNo || "12345678",
         staffName: staffName || "Test Staff"
       },
+      receiverDetails: {
+        name: receiverName || "Test Receiver",
+        phone: receiverPhone || "0000000000",
+        idNumber: receiverIDNo || "12345678"
+      },
       productDetails: {
         name: productName || "Test Product"
+      },
+      paymentInfo: {
+        status: paymentStatus
       }
     });
   };
@@ -131,8 +152,33 @@ const HomePage = () => {
           />
         </View>
 
+        {/* Receiver Details Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Receiver Details</Text>
+          <TextInput
+            value={receiverName}
+            onChangeText={setReceiverName}
+            placeholder="Receiver Name"
+            style={styles.inputField}
+          />
+          <TextInput
+            value={receiverPhone}
+            onChangeText={setReceiverPhone}
+            placeholder="Phone Number"
+            keyboardType="phone-pad"
+            style={styles.inputField}
+          />
+          <TextInput
+            value={receiverIDNo}
+            onChangeText={setReceiverIDNo}
+            placeholder="ID Number"
+            style={styles.inputField}
+          />
+        </View>
+
         {/* Product Details Section */}
         <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Product Details</Text>
           <TextInput
             value={productName}
             onChangeText={setProductName}
@@ -140,6 +186,17 @@ const HomePage = () => {
             style={styles.inputField}
           />
           <Text style={styles.noteText}>Note: Parcel weight will be recorded on the next page</Text>
+        </View>
+
+        {/* Payment Info Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Payment Information</Text>
+          <DropdownComponent
+            title="Payment Status"
+            data={[{ Name: "Paid" }, { Name: "Unpaid" }]}
+            onChange={(item) => setPaymentStatus(item.Name)}
+            defaultValue={paymentStatus}
+          />
         </View>
 
         <TouchableOpacity

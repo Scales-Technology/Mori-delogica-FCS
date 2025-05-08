@@ -65,61 +65,64 @@ const RecordPage = ({ route, navigation }) => {
   const [paymentStatus, setPaymentStatus] = useState(paymentInfo?.status || "Unpaid");
   const [senderInfoVisible, setSenderInfoVisible] = useState(false);
   const [receiverInfoVisible, setReceiverInfoVisible] = useState(false);
+  
+  // NEW: Ref for recent readings to help with stability detection
+  const recentReadingsRef = useRef([]);
 
-const bottomSheetModalRef = useRef(null);
+  const bottomSheetModalRef = useRef(null);
 
-useEffect(() => {
-  const fetchUserDetails = async () => {
-    try {
-      const userId = auth.currentUser.uid;
-      const userDocRef = doc(db, 'User', userId);
-      const userDoc = await getDoc(userDocRef);
+  useEffect(() => {
+    const fetchUserDetails = async () => {
+      try {
+        const userId = auth.currentUser.uid;
+        const userDocRef = doc(db, 'User', userId);
+        const userDoc = await getDoc(userDocRef);
 
-      if (userDoc.exists()) {
-        setUserDetails(userDoc.data());
-        console.log(userDetails)
-      } else {
-        console.log('User does not exist in Firestore');
+        if (userDoc.exists()) {
+          setUserDetails(userDoc.data());
+          console.log(userDetails)
+        } else {
+          console.log('User does not exist in Firestore');
+        }
+      } catch (error) {
+        console.error('Error fetching user details: ', error);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching user details: ', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  fetchUserDetails();
-}, []);
+    fetchUserDetails();
+  }, []);
 
 
-useEffect(() => {
-  const fetchDolleyCategories = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, 'DolleyCategory'));
-      const categories = [];
-      querySnapshot.forEach((doc) => {
-        categories.push({ id: doc.id, ...doc.data() });
-      });
-      setDolleyCategories(categories);
-    } catch (error) {
-      console.error("Error fetching dolley categories: ", error);
-    }
-  };
+  useEffect(() => {
+    const fetchDolleyCategories = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, 'DolleyCategory'));
+        const categories = [];
+        querySnapshot.forEach((doc) => {
+          categories.push({ id: doc.id, ...doc.data() });
+        });
+        setDolleyCategories(categories);
+      } catch (error) {
+        console.error("Error fetching dolley categories: ", error);
+      }
+    };
 
-  fetchDolleyCategories();
-}, []);
+    fetchDolleyCategories();
+  }, []);
 
-const addtareWeight = ()=>{
-  setDolleyVisible(true);
-}
+  const addtareWeight = ()=>{
+    setDolleyVisible(true);
+  }
 
-const toggleSenderInfo = () => {
-  setSenderInfoVisible(!senderInfoVisible);
-}
+  const toggleSenderInfo = () => {
+    setSenderInfoVisible(!senderInfoVisible);
+  }
 
-const toggleReceiverInfo = () => {
-  setReceiverInfoVisible(!receiverInfoVisible);
-}
+  const toggleReceiverInfo = () => {
+    setReceiverInfoVisible(!receiverInfoVisible);
+  }
 
   const {
     devices,
@@ -131,124 +134,246 @@ const toggleReceiverInfo = () => {
     readFromDevice,
   } = useBluetooth();
 
-  const [scaleData, setScaleData] = useState({ });
-  useEffect(() => {
-    if (receivedData) {
-      const parsedData = parseBluetoothData(receivedData);
-  
-      // Ensure parsedData.reading is not null before proceeding
-      if (parsedData.reading !== null && JSON.stringify(parsedData) !== JSON.stringify(scaleData)) {
-        setScaleData(parsedData);
-        console.log("PARSED", parsedData);
-        console.log("scaledata:", scaleData);
-      }
-    }
-  }, [receivedData]);
+  // Improved scale data state
+const [scaleData, setScaleData] = useState({
+  reading: null,
+  rawReading: null,
+  isStable: false,
+  lastUpdated: null
+});
+
+
+// const recentReadingsRef = useRef([]);
+
+const lastDataTimeRef = useRef(null);
+
+const isScaleActiveRef = useRef(false);
 
 useEffect(() => {
-    const newTotalQuantity = products.reduce(
-      (acc, item) => acc + parseInt(item.quantity),
-      0
-    );
-    const newTotalWeight = products.reduce(
-      (acc, item) => acc + parseFloat(item.weight),
-      0
-    );
-    const newTotalVolume = products.reduce(
-      (acc, item) => acc + parseFloat(item.tVol),
-      0
+  if (receivedData) {
+    const parsedData = parseBluetoothData(receivedData);
+    
+    // Update the last time we received data
+    lastDataTimeRef.current = Date.now();
+    
+    // If we're receiving data, mark the scale as active
+    isScaleActiveRef.current = true;
+    
+    if (parsedData && parsedData.reading !== null) {
+      setScaleData({
+        ...parsedData,
+        lastUpdated: Date.now()
+      });
+      console.log("PARSED", parsedData);
+    }
+  }
+}, [receivedData]);
+
+// scale inactivity
+useEffect(() => {
+  const inactivityTimer = setInterval(() => {
+    // If we haven't received data in 5 seconds (increased from 3), consider the scale inactive
+    if (lastDataTimeRef.current && Date.now() - lastDataTimeRef.current > 5000) {
+      isScaleActiveRef.current = false;
+      
+      // Clear the recent readings if the scale is inactive
+      recentReadingsRef.current = [];
+      
+      // Update scale state to show it's not stable when inactive
+      setScaleData(prev => ({
+        ...prev,
+        isStable: false
+      }));
+    }
+  }, 1000);
+  
+  return () => clearInterval(inactivityTimer);
+}, []);
+
+useEffect(() => {
+  const newTotalQuantity = products.reduce(
+    (acc, item) => acc + parseInt(item.quantity),
+    0
+  );
+  const newTotalWeight = products.reduce(
+    (acc, item) => acc + parseFloat(item.weight),
+    0
+  );
+  const newTotalVolume = products.reduce(
+    (acc, item) => acc + parseFloat(item.tVol),
+    0
+  );
+  
+  const newNetWeight = newTotalWeight - parseFloat(tareWeight);
+  setTotalQuantity(newTotalQuantity);
+  setTotalWeight(newTotalWeight.toFixed(2));
+  setNetWeight(newNetWeight.toFixed(2));
+  setTotalVolume(newTotalVolume.toFixed(1));
+}, [products]);
+
+/// Modified checkStability function for longer stability detection
+const checkStability = (newReading) => {
+  const isZeroReading = Math.abs(newReading) < 0.01;
+  
+  // Add the new reading to our recent readings array
+  recentReadingsRef.current.push(newReading);
+  
+  // Keep only the most recent 5 readings
+  if (recentReadingsRef.current.length > 5) {
+    recentReadingsRef.current.shift();
+  }
+  
+  // Need at least 2 readings and scale must be active to check stability
+  if (recentReadingsRef.current.length >= 2 && isScaleActiveRef.current) {
+    const recentValues = recentReadingsRef.current.slice(-3);
+    
+    // Find min and max values
+    const min = Math.min(...recentValues);
+    const max = Math.max(...recentValues);
+    
+    // Calculate difference and determine stability
+    // Adjust this threshold based on your scale's precision
+    const threshold = 0.1; 
+    
+    // Don't consider zero readings as stable unless explicitly needed
+    if (isZeroReading && recentValues.every(v => Math.abs(v) < 0.01)) {
+      console.log("Zero reading detected - not considering as stable");
+      return false;
+    }
+    
+    const isCurrentlyStable = (max - min) <= threshold;
+    
+    console.log(
+      "Stability check:", 
+      "Recent readings:", recentValues, 
+      "Min:", min, 
+      "Max:", max, 
+      "Difference:", (max - min), 
+      "Scale active:", isScaleActiveRef.current,
+      "Stable:", isCurrentlyStable
     );
     
-    const newNetWeight = newTotalWeight - parseFloat(tareWeight);
-    // const newTotalPrice = newTotalWeight * product.price;
-    setTotalQuantity(newTotalQuantity);
-    setTotalWeight(newTotalWeight.toFixed(2));
-    setNetWeight(newNetWeight.toFixed(2));
-    setTotalVolume(newTotalVolume.toFixed(1));
+    // IMPORTANT CHANGE: If we have more than 3 recent readings and they're all very close,
+    // keep the stable status even if there are minor fluctuations
+    if (recentReadingsRef.current.length >= 3) {
+      const allReadings = [...recentReadingsRef.current];
+      const minAll = Math.min(...allReadings);
+      const maxAll = Math.max(...allReadings);
+      
+      // If all readings are within a slightly wider threshold, maintain stability
+      const maintainThreshold = 0.2; // Slightly more forgiving threshold to maintain stability
+      if ((maxAll - minAll) <= maintainThreshold) {
+        return true;
+      }
+    }
+    
+    return isCurrentlyStable;
+  }
+  
+  return false; 
+};
 
-    // setTotalPrice(newTotalPrice.toFixed(2));
-  }, [products]);
+// Modified useEffect for scale data to maintain stability longer
+useEffect(() => {
+  if (receivedData) {
+    const parsedData = parseBluetoothData(receivedData);
+    
+    // Update the last time we received data
+    lastDataTimeRef.current = Date.now();
+    
+    // If we're receiving data, mark the scale as active
+    isScaleActiveRef.current = true;
+    
+    if (parsedData && parsedData.reading !== null) {
+      // IMPORTANT CHANGE: If we already have stable readings and the new reading is very close
+      // to the previous one, maintain the stable status
+      if (scaleData.isStable && scaleData.rawReading !== null) {
+        const difference = Math.abs(parsedData.rawReading - scaleData.rawReading);
+        const stabilityThreshold = 0.15; // Threshold to maintain stability
+        
+        if (difference <= stabilityThreshold) {
+          // Maintain stability but update the reading
+          setScaleData({
+            reading: parsedData.reading,
+            rawReading: parsedData.rawReading,
+            isStable: true,
+            lastUpdated: Date.now()
+          });
+          console.log("Maintaining stability, difference:", difference);
+          return;
+        }
+      }
+      
+      // Otherwise, use the normal stability check
+      setScaleData({
+        ...parsedData,
+        lastUpdated: Date.now()
+      });
+      console.log("PARSED", parsedData);
+    }
+  }
+}, [receivedData]);
 
+// Improved Bluetooth data parser
 const parseBluetoothData = (data) => {
   console.log("Received data:", data);
-
   let numericValue = null;
 
-  // Try to extract a numeric value from the data
   if (typeof data === 'string') {
-    // First, try to decode if it's base64 encoded
     try {
+      // Try base64 decoding first
       const decodedData = atob(data);
       const match = decodedData.match(/-?\d+(\.\d+)?/);
       if (match) {
         numericValue = parseFloat(match[0]);
       }
     } catch (error) {
-      // If decoding fails, it's not base64, so we'll try to extract numbers directly
+      console.log("Not base64 encoded, trying direct extraction");
       const match = data.match(/-?\d+(\.\d+)?/);
       if (match) {
-        console.log("value",match)
+        console.log("Extracted value:", match[0]);
         numericValue = parseFloat(match[0]);
       }
     }
   } else if (typeof data === 'number') {
-    console.log("test",data);
+    console.log("Numeric data received:", data);
     numericValue = data;
+  } else if (data && typeof data === 'object') {
+    console.log("Object data received, attempting to extract value");
+    const dataString = data.toString ? data.toString() : JSON.stringify(data);
+    const match = dataString.match(/-?\d+(\.\d+)?/);
+    if (match) {
+      console.log("Extracted value from object:", match[0]);
+      numericValue = parseFloat(match[0]);
+    }
   }
 
-  // If we found a valid numeric value, return it with 'kg' appended
-  if (numericValue !== null) {
-    console.log("Check1", numericValue)
+  console.log("Processed numeric value:", numericValue);
 
+  if (numericValue !== null && !isNaN(numericValue)) {
+    // Check stability using the improved method
+    const isCurrentlyStable = checkStability(numericValue);
+    
     return {
-      reading: numericValue.toFixed(2) + 'kg',
-      isStable: true // Always set to true as per requirement
+      reading: numericValue.toFixed(2),
+      rawReading: numericValue,
+      isStable: isCurrentlyStable
     };
   }
 
-  // If no valid numeric value was found, return null reading
   return {
-     reading: null,
-    isStable: true // Always set to true as per requirement
+    reading: null,
+    rawReading: null,
+    isStable: false
   };
 };
-  
-const handleSwitchBt = async () => {
+  const handleSwitchBt = async () => {
     const printer = store.getState().settings.printerAddress;
     connectToDevice(printer);
     console.log("Printer: ", printer);
   };
 
-const saveDataLocally = async () => {
-  const record = {
-    selectedSupplier,
-    category,
-    awbnumber,
-    selectedProductType,
-    shipper,
-    products,
-    netWeight,
-    totalWeight,
-    tareWeight,
-    paymentStatus,
-    senderDetails, // Add sender details to the record
-    receiverDetails, // Add receiver details to the record
-    createdAt: new Date(),
-  };
-
-  try {
-    const existingRecords = await AsyncStorage.getItem('localRecords');
-    const records = existingRecords ? JSON.parse(existingRecords) : [];
-    records.push(record);
-    await AsyncStorage.setItem('localRecords', JSON.stringify(records));
-    ToastAndroid.show("Record saved locally!", ToastAndroid.LONG);
-    setModalVisible(true);
-    // Reset Data
-  } catch (error) {
-    alert("Error saving record locally: " + error.message);
-  }
-};
-
+  // Improved saveData function with undefined value handling
   const saveData = async () => {
     console.log("test", category);
 
@@ -264,7 +389,92 @@ const saveDataLocally = async () => {
           },
           {
             text: "Save",
-            onPress: saveDataLocally
+            onPress: async () => {
+              setLoading(true);
+              try {
+                // Create record object with null for undefined values
+                const record = {
+                  supplier: selectedSupplier || null,
+                  category: category || null,
+                  awbnumber: awbnumber || null,
+                  productType: selectedProductType || null,
+                  shipper: shipper || null,
+                  products: products.length > 0 ? products : [],
+                  netWeight: netWeight || "0.00",
+                  totalWeight: totalWeight || "0.00",
+                  tareWeight: tareWeight || "0.00",
+                  paymentStatus: paymentStatus || "Unpaid",
+                  senderDetails: senderDetails || null,
+                  receiverDetails: receiverDetails || null,
+                  createdAt: new Date(),
+                  userId: auth.currentUser?.uid || null,
+                  businessId: BusinessId || null
+                };
+
+                // Clean the record object to remove any undefined values
+                const cleanRecord = Object.fromEntries(
+                  Object.entries(record).map(([key, value]) => 
+                    [key, value === undefined ? null : value]
+                  )
+                );
+
+                console.log("Saving record:", cleanRecord);
+                
+                try {
+                  // Try to save to Firebase first (if online)
+                  const recordsRef = collection(db, "Records");
+                  await addDoc(recordsRef, cleanRecord);
+                  
+                  // Also save locally as backup
+                  const existingRecords = await AsyncStorage.getItem('localRecords');
+                  const records = existingRecords ? JSON.parse(existingRecords) : [];
+                  records.push(cleanRecord);
+                  await AsyncStorage.setItem('localRecords', JSON.stringify(records));
+                  
+                  ToastAndroid.show("Record saved to Firebase!", ToastAndroid.LONG);
+                  setModalVisible(true);
+                } catch (firebaseError) {
+                  // If Firebase save fails, save locally and offer sync option
+                  console.error("Firebase save error:", firebaseError);
+                  
+                  // Save locally
+                  const existingRecords = await AsyncStorage.getItem('localRecords');
+                  const records = existingRecords ? JSON.parse(existingRecords) : [];
+                  records.push(cleanRecord);
+                  await AsyncStorage.setItem('localRecords', JSON.stringify(records));
+                  
+                  ToastAndroid.show("Record saved locally!", ToastAndroid.LONG);
+                  setModalVisible(true);
+                  
+                  // Ask user if they want to sync now
+                  setTimeout(() => {
+                    Alert.alert(
+                      "Record Saved Locally",
+                      "Would you like to sync this record to Firebase now?",
+                      [
+                        {
+                          text: "Later",
+                          style: "cancel"
+                        },
+                        {
+                          text: "Sync Now",
+                          onPress: syncLocalRecordsToFirebase
+                        }
+                      ]
+                    );
+                  }, 1000); // Small delay to ensure Toast is visible first
+                }
+              } catch (error) {
+                console.error("Error saving record:", error);
+                Alert.alert(
+                  "Error",
+                  `Failed to save: ${error.message}`,
+                  [{ text: "OK" }]
+                );
+              } finally {
+                setLoading(false);
+              }
+            }
           }
         ],
         { cancelable: false }
@@ -273,7 +483,80 @@ const saveDataLocally = async () => {
       alert("Please select all fields before saving.");
     }
   };
-const showPrinterReceipt = async () => {
+  // sync local records with Firebase
+
+  const syncLocalRecordsToFirebase = async () => {
+    try {
+      setLoading(true);
+      
+      // Check for internet connectivity
+      const networkState = await Network.getNetworkStateAsync();
+      if (!networkState.isConnected || !networkState.isInternetReachable) {
+        Alert.alert("No Internet", "Please connect to the internet to sync records.");
+        setLoading(false);
+        return;
+      }
+
+      // Get local records
+      const localRecordsJson = await AsyncStorage.getItem('localRecords');
+      if (!localRecordsJson) {
+        ToastAndroid.show("No local records to sync", ToastAndroid.SHORT);
+        setLoading(false);
+        return;
+      }
+
+      const localRecords = JSON.parse(localRecordsJson);
+      
+      // Count of successfully synced records
+      let syncedCount = 0;
+      let errorCount = 0;
+      
+      // Process each local record
+      for (const record of localRecords) {
+        // Clean the record to ensure no undefined values
+        const cleanRecord = Object.fromEntries(
+          Object.entries(record).map(([key, value]) => 
+            [key, value === undefined ? null : value]
+          )
+        );
+        
+        try {
+          // Add to Firebase
+          const recordsRef = collection(db, "Records");
+          await addDoc(recordsRef, {
+            ...cleanRecord,
+            syncedAt: new Date(),
+            userId: auth.currentUser?.uid || null,
+            businessId: BusinessId || null
+          });
+          
+          syncedCount++;
+        } catch (error) {
+          console.error("Error syncing record:", error);
+          errorCount++;
+        }
+      }
+      
+      // If all records were synced successfully, clear local storage
+      if (errorCount === 0 && syncedCount > 0) {
+        await AsyncStorage.removeItem('localRecords');
+        ToastAndroid.show(`Successfully synced ${syncedCount} records to Firebase!`, ToastAndroid.LONG);
+      } else if (syncedCount > 0) {
+        // Some records were synced, but not all
+        ToastAndroid.show(`Synced ${syncedCount} records. ${errorCount} failed.`, ToastAndroid.LONG);
+      } else {
+        // No records were synced
+        ToastAndroid.show("Failed to sync records to Firebase", ToastAndroid.LONG);
+      }
+    } catch (error) {
+      console.error("Sync error:", error);
+      Alert.alert("Sync Error", `Failed to sync: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const showPrinterReceipt = async () => {
     console.log("DDATA:",selectedSupplier);
     try {
         // Ensure these variables are defined
@@ -348,37 +631,48 @@ const showPrinterReceipt = async () => {
     } catch (error) {
         console.error("Error generating the receipt:", error);
     }
-};
+  };
 
-const handleChange = (text) => {
-  // Regex to match numbers with up to two decimal places
-  const validNumber = text.match(/^\d*\.?\d{0,2}$/);
-  if (validNumber) {
-    setSelectedSupplier(text);
-  }
-};
+  const handleChange = (text) => {
+    // Regex to match numbers with up to two decimal places
+    const validNumber = text.match(/^\d*\.?\d{0,2}$/);
+    if (validNumber) {
+      setSelectedSupplier(text);
+    }
+  };
 
-const handleDelete = (index) => {
-  Alert.alert(
-      'Confirm Deletion',
-      'Are you sure you want to delete this product?',
-      [
-          {
-              text: 'Cancel',
-              style: 'cancel',
-          },
-          {
-              text: 'Delete',
-              onPress: () => {
-                  const updatedProducts = products.filter((_, i) => i !== index);
-                  setProducts(updatedProducts);
-              },
-              style: 'destructive',
-          },
-      ],
-      { cancelable: true }
-  );
-};
+  const handleDelete = (index) => {
+    Alert.alert(
+        'Confirm Deletion',
+        'Are you sure you want to delete this product?',
+        [
+            {
+                text: 'Cancel',
+                style: 'cancel',
+            },
+            {
+                text: 'Delete',
+                onPress: () => {
+                    const updatedProducts = products.filter((_, i) => i !== index);
+                    setProducts(updatedProducts);
+                },
+                style: 'destructive',
+            },
+        ],
+        { cancelable: true }
+    );
+  };
+
+  // NEW: Reset stability function to clear readings when needed
+  const resetStability = () => {
+    recentReadingsRef.current = [];
+    setScaleData({
+      reading: null,
+      rawReading: null,
+      isStable: false
+    });
+  };
+
 
 return (
   <ScrollView style={{ flex: 1, backgroundColor: "#F9F9F9" }}>
@@ -558,51 +852,84 @@ return (
               </Text>
             </View>
           </View>
-
           <TouchableOpacity
-          style={styles.button}
-          onPress={() => {
-            Alert.alert(
-              "Confirm Capture",
-              "Are you sure you want to capture this product?",
-              [
+  style={[
+    styles.button, 
+    { 
+      backgroundColor: scaleData.isStable ? "#4CAF50" : "#CCCCCC", 
+      opacity: scaleData.isStable ? 1 : 0.5 
+    }
+  ]}
+  onPress={() => {
+    if (!scaleData.isStable) {
+      ToastAndroid.show("Please wait for scale to stabilize", ToastAndroid.SHORT);
+      return;
+    }
+    
+    Alert.alert(
+      "Confirm Capture",
+      `Are you sure you want to capture this product?\nWeight: ${scaleData.reading}kg`,
+      [
+        {
+          text: "Cancel",
+          onPress: () => console.log("Cancel Pressed"),
+          style: "cancel"
+        },
+        {
+          text: "OK", 
+          onPress: () => {
+            const totalvolume = height * width * length * pquantity;
+            // const airlineCalc = totalvolume / 6000;
+            const airlineCalc = totalvolume / 1;
+            
+            if (scaleData.reading) {
+              // Use rawReading instead of parsing the string again
+              const weightValue = scaleData.rawReading || parseFloat(scaleData.reading);
+              
+              setProducts((prevProducts) => [
+                ...prevProducts,
                 {
-                  text: "Cancel",
-                  onPress: () => console.log("Cancel Pressed"),
-                  style: "cancel"
+                  ...selectedProductType,
+                  quantity: pquantity,
+                  weight: weightValue,
+                  productType: selectedProductType,
+                  tVol: airlineCalc,
+                  ht: height,
+                  wd: width,
+                  lt: length
                 },
-                {
-                  text: "OK", 
-                  onPress: () => {
-                    const totalvolume = height * width * length * pquantity;
-                    // const airlineCalc = totalvolume / 6000;
-                    const airlineCalc = totalvolume / 1;
-                    if (scaleData.reading) {
-                      setProducts((prevProducts) => [
-                        ...prevProducts,
-                        {
-                          ...selectedProductType,
-                          quantity: pquantity,
-                          weight: parseFloat(scaleData.reading),
-                          productType: selectedProductType,
-                          tVol: airlineCalc,
-                          ht: height,
-                          wd: width,
-                          lt: length
-                        },
-                      ]);
-                    } else {
-                      ToastAndroid.show("No valid weight reading", ToastAndroid.SHORT);
-                    }
-                  }
-                }
-              ],
-              { cancelable: false }
-            );
-          }}
-        >
-          <Text style={styles.textButton}>Capture</Text>
-        </TouchableOpacity>
+              ]);
+              
+              // IMPORTANT: Don't reset scaleData after capturing - this keeps the button usable
+              // as long as the readings remain stable
+              ToastAndroid.show("Product captured successfully!", ToastAndroid.SHORT);
+              
+              // Optional: Clear the form inputs but NOT the scale reading
+              setSelectedProductType("");
+              setQuantity("");
+              setLength("");
+              setWidth("");
+              setHeight("");
+            } else {
+              ToastAndroid.show("No valid weight reading", ToastAndroid.SHORT);
+            }
+          }
+        }
+      ],
+      { cancelable: false }
+    );
+  }}
+  disabled={!scaleData.isStable}
+>
+  <Text style={[
+    styles.textButton, 
+    { color: scaleData.isStable ? "#FFFFFF" : "#999999" }
+  ]}>
+    {scaleData.isStable && scaleData.reading 
+      ? `Capture (${scaleData.reading}kg)` 
+      : "Waiting for stable reading..."}
+  </Text>
+</TouchableOpacity>
 
        <View style={styles.preview}>
         <ScrollView style={styles.scroll}>
@@ -648,6 +975,23 @@ return (
           </Text>
         )}
       </TouchableOpacity>
+
+      <TouchableOpacity
+  style={[
+    styles.button, 
+    { backgroundColor: loading ? "#ccc" : "#3498db" }
+  ]}
+  onPress={syncLocalRecordsToFirebase}
+  disabled={loading}
+>
+  {loading ? (
+    <ActivityIndicator color="#ffffff" />
+  ) : (
+    <Text style={[styles.textButton, { color: "#fff" }]}>
+      Sync to Firebase
+    </Text>
+  )}
+</TouchableOpacity>
 
     
     </View>

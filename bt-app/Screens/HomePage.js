@@ -206,12 +206,12 @@ const HomePage = () => {
           <Text style={styles.buttonText}>Start</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={[styles.button, styles.button_Bg, { marginTop: 15, marginBottom: 30 }]}
           onPress={pushRecordsToFirebase}
         >
           <Text style={styles.buttonText}>Synchronize</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
     </ScrollView>
   );

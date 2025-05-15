@@ -19,12 +19,14 @@ import { setUser, setLoggedIn } from "../store";
 import { auth, db } from "../Database/config";
 import {
   collection,
-  addDoc
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  onAuthStateChanged
+  updateProfile,
+  onAuthStateChanged,
 } from "firebase/auth";
 import { useNavigation } from "@react-navigation/native";
 
@@ -33,12 +35,13 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 const LoginPage = () => {
   const [formData, setFormData] = useState({
     email: "",
-    password: ""
+    password: "",
+    name: "", // Added name field
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
-  
+
   const dispatch = useDispatch();
   const navigation = useNavigation();
 
@@ -47,7 +50,7 @@ const LoginPage = () => {
       if (user) {
         dispatch(setUser(user));
         dispatch(setLoggedIn(true));
-        navigation.replace('TabLayout');
+        navigation.replace("TabLayout");
       }
     });
 
@@ -55,9 +58,9 @@ const LoginPage = () => {
   }, [dispatch, navigation]);
 
   const handleInputChange = (name, value) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
     setError(""); // Clear error when user starts typing
   };
@@ -65,6 +68,10 @@ const LoginPage = () => {
   const validateForm = () => {
     if (!formData.email || !formData.password) {
       setError("Please fill in all fields");
+      return false;
+    }
+    if (isSignUp && !formData.name) {
+      setError("Name is required for sign-up");
       return false;
     }
     if (!formData.email.includes("@")) {
@@ -92,13 +99,19 @@ const LoginPage = () => {
           formData.password
         );
 
+        // Update the user's display name in Firebase Authentication
+        await updateProfile(user, { displayName: formData.name });
+
+        // Store user data in Firestore, including the name
         await addDoc(collection(db, "Users"), {
           uid: user.uid,
           email: user.email,
-          createdAt: new Date(),
+          name: formData.name, // Add name to Firestore
+          role: "warehouse_staff",
+          createdAt: serverTimestamp(),
         });
 
-        ToastAndroid.show("Account created successfully!", ToastAndroid.LONG);
+        ToastAndroid.show("Account created successfully! You are registered as staff.", ToastAndroid.LONG);
       } else {
         await signInWithEmailAndPassword(
           auth,
@@ -112,13 +125,13 @@ const LoginPage = () => {
       navigation.replace("TabLayout");
     } catch (err) {
       setError(
-        err.code === 'auth/email-already-in-use'
-          ? 'Email already registered. Please login instead.'
-          : err.code === 'auth/invalid-email'
-          ? 'Invalid email address'
-          : err.code === 'auth/wrong-password'
-          ? 'Invalid password'
-          : 'Authentication failed. Please try again.'
+        err.code === "auth/email-already-in-use"
+          ? "Email already registered. Please login instead."
+          : err.code === "auth/invalid-email"
+          ? "Invalid email address"
+          : err.code === "auth/wrong-password"
+          ? "Invalid password"
+          : "Authentication failed. Please try again."
       );
     } finally {
       setLoading(false);
@@ -127,7 +140,7 @@ const LoginPage = () => {
 
   return (
     <ImageBackground
-      source={require('../assets/images/loginbackground.jpg')}
+      source={require("../assets/images/loginbackground.jpg")}
       style={styles.background}
       resizeMode="cover"
     >
@@ -140,14 +153,28 @@ const LoginPage = () => {
             contentContainerStyle={styles.scrollContainer}
             keyboardShouldPersistTaps="handled"
           >
-            <Image 
-              source={require('../assets/images/lg1.png')}
+            <Image
+              source={require("../assets/images/lg1.png")}
               style={styles.logo}
               resizeMode="contain"
             />
             <Text style={styles.title}>Welcome</Text>
-            
+
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            {isSignUp && (
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your name"
+                  placeholderTextColor="#999"
+                  onChangeText={(text) => handleInputChange("name", text)}
+                  value={formData.name}
+                  autoCapitalize="words"
+                />
+              </View>
+            )}
 
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Email</Text>
@@ -211,12 +238,12 @@ const LoginPage = () => {
 const styles = StyleSheet.create({
   background: {
     flex: 1,
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)', // Semi-transparent overlay to improve contrast
+    backgroundColor: "rgba(0,0,0,0.5)",
   },
   container: {
     flex: 1,
@@ -232,9 +259,9 @@ const styles = StyleSheet.create({
     color: "white",
     marginBottom: 30,
     fontFamily: "Poppins-ExtraBold",
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: {width: -1, height: 1},
-    textShadowRadius: 10
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: -1, height: 1 },
+    textShadowRadius: 10,
   },
   logo: {
     width: 250,
@@ -250,9 +277,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 5,
     fontFamily: "Poppins-Medium",
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: {width: -1, height: 1},
-    textShadowRadius: 3
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: -1, height: 1 },
+    textShadowRadius: 3,
   },
   input: {
     width: "100%",
@@ -307,11 +334,11 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins-Medium",
     paddingHorizontal: 20,
     fontSize: 18,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: "rgba(0,0,0,0.5)",
     paddingVertical: 8,
     paddingHorizontal: 15,
     borderRadius: 8,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   switchButton: {
     marginTop: 20,
@@ -321,9 +348,9 @@ const styles = StyleSheet.create({
     color: "#7CFC00",
     fontFamily: "Poppins-Medium",
     fontSize: 16,
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: {width: -1, height: 1},
-    textShadowRadius: 5
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: -1, height: 1 },
+    textShadowRadius: 5,
   },
 });
 

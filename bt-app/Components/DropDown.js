@@ -4,12 +4,14 @@ import { Dropdown } from 'react-native-element-dropdown';
 import AntDesign from '@expo/vector-icons/AntDesign';
 
 const DropdownComponent = ({ title, data, onChange }) => {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState('');
+
+  console.log('DropdownComponent rendering with title:', title); // Debug log
 
   const renderItem = item => {
     return (
       <View style={styles.item}>
-        <Text style={[styles.textItem, {color: item.value === value ? 'blue' : 'black'}]}>
+        <Text style={[styles.textItem, { color: item.value === value ? 'blue' : 'black' }]}>
           {item.Name}
         </Text>
         {item.value === value && (
@@ -41,12 +43,12 @@ const DropdownComponent = ({ title, data, onChange }) => {
         maxHeight={300}
         labelField="Name"
         valueField="value"
-        placeholder={`Select ${title}`}
+        placeholder="Select an option" 
         searchPlaceholder="Search..."
         value={value}
         onChange={item => {
           setValue(item.value);
-          onChange && onChange(item)
+          onChange && onChange(item);
         }}
         renderLeftIcon={() => (
           <AntDesign style={styles.icon} color="black" name="Safety" size={20} />

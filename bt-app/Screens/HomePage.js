@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Text,
   StyleSheet,
@@ -10,12 +10,14 @@ import {
   ToastAndroid,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { auth, db } from '../Database/config';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import DropdownComponent from '../Components/DropDown';
 import Header from '../Components/Header';
 import data from '../store/dummyData';
 
 const screenWidth = Dimensions.get('window').width;
-const WEIGHT_UNIT = 'kg'; // Explicitly define weight unit for consistency
+const WEIGHT_UNIT = 'kg';
 
 // Reusable InputField component
 const InputField = ({ value, onChange, placeholder, keyboardType, style, error }) => (
@@ -47,10 +49,11 @@ const CustomButton = ({ title, onPress, style, textStyle }) => (
 const HomePage = () => {
   const navigation = useNavigation();
   const [appData] = useState(data);
+  const [staffName, setStaffName] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   // State for form inputs and errors
   const [form, setForm] = useState({
-    selectedCategory: '',
     senderName: '',
     senderPhone: '',
     senderIDNo: '',
@@ -63,6 +66,45 @@ const HomePage = () => {
   });
   const [formErrors, setFormErrors] = useState({});
 
+  // Fetch staff name on component mount (for Header display)
+  useEffect(() => {
+    const fetchStaffName = async () => {
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          if (user.displayName) {
+            setStaffName(user.displayName);
+            setForm((prev) => ({ ...prev, staffName: user.displayName }));
+          } else {
+            const q = query(collection(db, 'Users'), where('uid', '==', user.uid));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              const userDoc = querySnapshot.docs[0].data();
+              setStaffName(userDoc.name || 'Staff');
+              setForm((prev) => ({ ...prev, staffName: userDoc.name || 'Staff' }));
+            } else {
+              setStaffName('Staff');
+              setForm((prev) => ({ ...prev, staffName: 'Staff' }));
+            }
+          }
+        } else {
+          setStaffName('Staff');
+          setForm((prev) => ({ ...prev, staffName: 'Staff' }));
+          ToastAndroid.show('User not authenticated', ToastAndroid.SHORT);
+        }
+      } catch (err) {
+        console.error('Error fetching staff name:', err);
+        setStaffName('Staff');
+        setForm((prev) => ({ ...prev, staffName: 'Staff' }));
+        ToastAndroid.show('Error fetching staff name', ToastAndroid.SHORT);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchStaffName();
+  }, []);
+
   // Centralized form change handler
   const handleFormChange = (field) => (value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -71,7 +113,7 @@ const HomePage = () => {
 
   // Input validation
   const validateInput = (field, value) => {
-    if (!value && ['selectedCategory', 'senderName', 'receiverName'].includes(field)) {
+    if (!value && ['senderName', 'receiverName'].includes(field)) {
       return 'This field is required';
     }
     if (field === 'senderPhone' || field === 'receiverPhone') {
@@ -82,7 +124,7 @@ const HomePage = () => {
 
   const handleStart = () => {
     const errors = {};
-    ['selectedCategory', 'senderName', 'receiverName'].forEach((field) => {
+    ['senderName', 'receiverName'].forEach((field) => {
       const error = validateInput(field, form[field]);
       if (error) errors[field] = error;
     });
@@ -94,12 +136,11 @@ const HomePage = () => {
     }
 
     navigation.navigate('RecordPage', {
-      category: form.selectedCategory?.Name || 'Default Category',
       senderDetails: {
         name: form.senderName || 'Test Sender',
         phone: form.senderPhone || '0000000000',
         idNumber: form.senderIDNo || '12345678',
-        staffName: form.staffName || 'Test Staff',
+        staffName: form.staffName || 'Staff',
       },
       receiverDetails: {
         name: form.receiverName || 'Test Receiver',
@@ -115,22 +156,18 @@ const HomePage = () => {
     });
   };
 
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: '#F9F9F9' }}>
       <View style={styles.container}>
-        <Header />
-
-        {/* Category Selection */}
-        <View style={styles.sectionContainer}>
-          <DropdownComponent
-            title="Select Category"
-            onChange={(item) => handleFormChange('selectedCategory')(item)}
-            data={appData.category}
-          />
-          {formErrors.selectedCategory && (
-            <Text style={styles.errorText}>{formErrors.selectedCategory}</Text>
-          )}
-        </View>
+        <Header staffName={staffName} navigation={navigation} />
 
         {/* Sender Company Details Section */}
         <View style={styles.sectionContainer}>
@@ -153,10 +190,11 @@ const HomePage = () => {
             onChange={handleFormChange('senderIDNo')}
             placeholder="ID Number"
           />
+          <Text style={styles.inputLabel}>Served by:</Text>
           <InputField
             value={form.staffName}
             onChange={handleFormChange('staffName')}
-            placeholder="Staff Name"
+            placeholder="Your Name (Staff)"
           />
         </View>
 
@@ -192,7 +230,7 @@ const HomePage = () => {
             placeholder="Product Name"
           />
           <Text style={styles.noteText}>
-            Note: Parcel weight will be recorded on the next page 
+            Note: Parcel weight will be recorded on the next page
           </Text>
         </View>
 
@@ -260,6 +298,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginLeft: 10,
     fontFamily: 'Poppins-Regular',
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontFamily: 'Poppins-Regular',
+    color: '#666',
+    marginBottom: 5,
   },
   noteText: {
     fontFamily: 'Poppins-Italic',

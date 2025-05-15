@@ -10,12 +10,14 @@ import {
   ActivityIndicator,
   ToastAndroid,
   Alert,
+  Platform,
 } from 'react-native';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as Network from 'expo-network';
 import AntDesign from '@expo/vector-icons/AntDesign';
+import DropDownPicker from 'react-native-dropdown-picker';
 import { useBluetooth } from 'rn-bluetooth-classic';
-import { addDoc, collection, doc, getDoc } from 'firebase/firestore';
+import { addDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../Database/config';
 import { store } from '../store/store';
 import { useDispatch, useSelector } from 'react-redux';
@@ -24,28 +26,30 @@ import { debounce } from 'lodash';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+// Reusable Components
 const InputField = ({ value, onChange, placeholder, style, keyboardType }) => (
   <TextInput
     value={value}
     onChangeText={onChange}
     placeholder={placeholder}
-    style={style}
+    style={[styles.input, style]}
     keyboardType={keyboardType}
+    placeholderTextColor="#999"
   />
 );
 
 const CustomButton = ({ title, onPress, disabled, style, textStyle, loading, icon }) => (
   <TouchableOpacity
-    style={[styles.button, style, disabled && { backgroundColor: '#ccc' }]}
+    style={[styles.button, style, disabled && styles.buttonDisabled]}
     onPress={onPress}
-    disabled={disabled}
+    disabled={disabled || loading}
   >
     {loading ? (
       <ActivityIndicator color="#fff" />
     ) : (
       <>
         {icon}
-        <Text style={[styles.textButton, textStyle]}>{title}</Text>
+        <Text style={[styles.buttonText, textStyle]}>{title}</Text>
       </>
     )}
   </TouchableOpacity>
@@ -53,19 +57,20 @@ const CustomButton = ({ title, onPress, disabled, style, textStyle, loading, ico
 
 const ProductRow = React.memo(({ item, index, onDelete }) => (
   <TouchableOpacity onPress={() => onDelete(index)} style={styles.tableRow}>
-    <Text style={styles.tableCell}>{item.productType}</Text>
+    <Text style={styles.tableCell} numberOfLines={1}>{item.productType}</Text>
     <Text style={styles.tableCell}>{item.quantity}</Text>
     <Text style={styles.tableCell}>{item.weight}kg</Text>
-    <Text style={styles.tableCell}>{`${item.lt}*${item.wd}*${item.ht}`}</Text>
+    <Text style={styles.tableCell}>{`${item.lt || 0}*${item.wd || 0}*${item.ht || 0}`}</Text>
     <Text style={styles.tableCell}>{item.tVol.toFixed(1)} cm³</Text>
   </TouchableOpacity>
 ));
 
 const RecordPage = ({ route, navigation }) => {
-  const { category, awbnumber, shipper, paymentInfo, senderDetails, receiverDetails } = route.params;
+  const { awbnumber, shipper, paymentInfo, senderDetails, receiverDetails } = route.params || {};
   const dispatch = useDispatch();
   const { BusinessId } = useSelector((state) => state.settings);
 
+  // State Management
   const [form, setForm] = useState({
     productType: '',
     destination: '',
@@ -76,20 +81,21 @@ const RecordPage = ({ route, navigation }) => {
     tareWeight: '0.00',
     pmcNumber: '',
   });
+  const [locations, setLocations] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [dolleyVisible, setDolleyVisible] = useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [paymentStatus, setPaymentStatus] = useState(paymentInfo?.status || 'Unpaid');
-  const [senderInfoVisible, setSenderInfoVisible] = useState(false);
-  const [receiverInfoVisible, setReceiverInfoVisible] = useState(false);
+  const [infoVisibility, setInfoVisibility] = useState({ sender: false, receiver: false });
   const [scaleData, setScaleData] = useState({
     reading: null,
     rawReading: null,
     isStable: false,
     lastUpdated: null,
   });
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [loadingLocations, setLoadingLocations] = useState(true);
 
   const recentReadingsRef = useRef([]);
   const lastDataTimeRef = useRef(null);
@@ -97,33 +103,47 @@ const RecordPage = ({ route, navigation }) => {
 
   const { connectToDevice, receivedData, writeToDevice } = useBluetooth();
 
-  const validateNumericInput = (text) => {
-    const valid = text.match(/^\d*\.?\d{0,2}$/);
-    return valid ? text : '';
-  };
+  // Optimized Functions
+  const validateNumericInput = useCallback((text) => {
+    if (text === '') return text;
+    return /^\d*\.?\d{0,2}$/.test(text) ? text : '';
+  }, []);
 
-  const updateForm = (field, value) => {
-    const numericFields = ['quantity', 'length', 'width', 'height', 'tareWeight'];
+  const updateForm = useCallback((field, value) => {
     setForm((prev) => ({
       ...prev,
-      [field]: numericFields.includes(field) ? validateNumericInput(value) : value,
+      [field]: ['quantity', 'length', 'width', 'height', 'tareWeight'].includes(field)
+        ? validateNumericInput(value)
+        : value,
     }));
-  };
+  }, [validateNumericInput]);
 
-  const { totalQuantity, totalWeight, netWeight, totalVolume } = useMemo(() => {
-    const totalQty = products.reduce((acc, item) => acc + parseInt(item.quantity, 10), 0);
-    const totalWgt = products.reduce((acc, item) => acc + parseFloat(item.weight), 0);
-    const totalVol = products.reduce((acc, item) => acc + parseFloat(item.tVol), 0);
-    const netWgt = totalWgt - parseFloat(form.tareWeight || 0);
+  const calculateTotals = useMemo(() => {
+    const totals = products.reduce(
+      (acc, item) => ({
+        quantity: acc.quantity + parseInt(item.quantity, 10),
+        weight: acc.weight + parseFloat(item.weight),
+        volume: acc.volume + parseFloat(item.tVol),
+      }),
+      { quantity: 0, weight: 0, volume: 0 }
+    );
+    const netWeight = totals.weight - parseFloat(form.tareWeight || 0);
     return {
-      totalQuantity: totalQty,
-      totalWeight: totalWgt.toFixed(2),
-      netWeight: netWgt.toFixed(2),
-      totalVolume: totalVol.toFixed(1),
+      totalQuantity: totals.quantity,
+      totalWeight: totals.weight.toFixed(2),
+      netWeight: netWeight.toFixed(2),
+      totalVolume: totals.volume.toFixed(1),
     };
   }, [products, form.tareWeight]);
 
-  const checkStability = (newReading) => {
+  // Define dropdownItems
+  const dropdownItems = useMemo(() => [
+    { label: 'Select Destination', value: '' },
+    ...locations.map((location) => ({ label: location.name, value: location.name })),
+  ], [locations]);
+
+  // Bluetooth Handling
+  const checkStability = useCallback((newReading) => {
     const isZeroReading = Math.abs(newReading) < 0.01;
     recentReadingsRef.current.push(newReading);
     if (recentReadingsRef.current.length > 5) recentReadingsRef.current.shift();
@@ -149,37 +169,49 @@ const RecordPage = ({ route, navigation }) => {
       return isCurrentlyStable;
     }
     return false;
-  };
+  }, []);
 
-  const parseBluetoothData = debounce((data) => {
-    let numericValue = null;
-    try {
-      if (typeof data === 'string') {
-        try {
-          const decodedData = atob(data);
-          const match = decodedData.match(/-?\d+(\.\d+)?/);
-          if (match) numericValue = parseFloat(match[0]);
-        } catch {
-          const match = data.match(/-?\d+(\.\d+)?/);
+  const parseBluetoothData = useCallback(
+    debounce((data) => {
+      let numericValue = null;
+      try {
+        console.log('Raw receivedData:', data);
+        if (typeof data === 'string') {
+          try {
+            const decodedData = atob(data);
+            const match = decodedData.match(/-?\d+(\.\d+)?/);
+            if (match) numericValue = parseFloat(match[0]);
+          } catch {
+            const match = data.match(/-?\d+(\.\d+)?/);
+            if (match) numericValue = parseFloat(match[0]);
+          }
+        } else if (typeof data === 'number') {
+          numericValue = data;
+        } else if (data && typeof data === 'object') {
+          const dataString = data.toString ? data.toString() : JSON.stringify(data);
+          const match = dataString.match(/-?\d+(\.\d+)?/);
           if (match) numericValue = parseFloat(match[0]);
         }
-      } else if (typeof data === 'number') {
-        numericValue = data;
-      } else if (data && typeof data === 'object') {
-        const dataString = data.toString ? data.toString() : JSON.stringify(data);
-        const match = dataString.match(/-?\d+(\.\d+)?/);
-        if (match) numericValue = parseFloat(match[0]);
-      }
 
-      if (numericValue !== null && !isNaN(numericValue)) {
-        const isCurrentlyStable = checkStability(numericValue);
-        setScaleData({
-          reading: numericValue.toFixed(2),
-          rawReading: numericValue,
-          isStable: isCurrentlyStable,
-          lastUpdated: Date.now(),
-        });
-      } else {
+        console.log('Parsed numericValue:', numericValue);
+        if (numericValue !== null && !isNaN(numericValue)) {
+          const isCurrentlyStable = checkStability(numericValue);
+          setScaleData({
+            reading: numericValue.toFixed(2) + ' kg',
+            rawReading: numericValue,
+            isStable: isCurrentlyStable,
+            lastUpdated: Date.now(),
+          });
+        } else {
+          setScaleData({
+            reading: null,
+            rawReading: null,
+            isStable: false,
+            lastUpdated: Date.now(),
+          });
+        }
+      } catch (error) {
+        console.error('Error parsing Bluetooth data:', error);
         setScaleData({
           reading: null,
           rawReading: null,
@@ -187,24 +219,41 @@ const RecordPage = ({ route, navigation }) => {
           lastUpdated: Date.now(),
         });
       }
-    } catch (error) {
-      console.error('Error parsing Bluetooth data:', error);
-      setScaleData({
-        reading: null,
-        rawReading: null,
-        isStable: false,
-        lastUpdated: Date.now(),
-      });
-    }
-  }, 100);
+    }, 100),
+    [checkStability]
+  );
+
+  // Effects
+  useEffect(() => {
+    const fetchLocations = async () => {
+      setLoadingLocations(true);
+      try {
+        const locationsRef = collection(db, 'locations');
+        const querySnapshot = await getDocs(locationsRef);
+        const locationsData = querySnapshot.docs.map((doc) => ({
+          id: doc.id,
+          name: doc.data().name || 'Unknown',
+        }));
+        console.log('Fetched locations:', locationsData);
+        setLocations(locationsData);
+      } catch (error) {
+        console.error('Error fetching locations:', error);
+        ToastAndroid.show('Failed to fetch locations', ToastAndroid.SHORT);
+      } finally {
+        setLoadingLocations(false);
+      }
+    };
+    fetchLocations();
+  }, []);
 
   useEffect(() => {
+    console.log('Sender Details:', senderDetails);
     if (receivedData) {
       lastDataTimeRef.current = Date.now();
       isScaleActiveRef.current = true;
       parseBluetoothData(receivedData);
     }
-  }, [receivedData]);
+  }, [receivedData, parseBluetoothData, senderDetails]);
 
   useEffect(() => {
     const inactivityTimer = setInterval(() => {
@@ -217,23 +266,24 @@ const RecordPage = ({ route, navigation }) => {
     return () => clearInterval(inactivityTimer);
   }, []);
 
-  const saveToFirebase = async (record) => {
+  // Data Persistence
+  const saveToFirebase = useCallback(async (record) => {
     const recordsRef = collection(db, 'Records');
     await addDoc(recordsRef, record);
     ToastAndroid.show('Record saved to Firebase!', ToastAndroid.LONG);
-  };
+  }, []);
 
-  const saveToLocalStorage = async (record) => {
+  const saveToLocalStorage = useCallback(async (record) => {
     const existingRecords = await AsyncStorage.getItem('localRecords');
     const records = existingRecords ? JSON.parse(existingRecords) : [];
-    records.push(record);
-    await AsyncStorage.setItem('localRecords', JSON.stringify(records));
+    await AsyncStorage.setItem('localRecords', JSON.stringify([...records, record]));
     ToastAndroid.show('Record saved locally!', ToastAndroid.LONG);
-  };
+  }, []);
 
-  const saveData = async () => {
-    if (!form.productType || !form.destination || !category) {
-      alert('Please fill all required fields.');
+  const saveData = useCallback(async () => {
+    const { productType, destination } = form;
+    if (!productType.trim() || !destination.trim()) {
+      Alert.alert('Validation Error', 'Please fill all required fields (Product Type and Destination).');
       return;
     }
 
@@ -245,16 +295,16 @@ const RecordPage = ({ route, navigation }) => {
           setLoading(true);
           try {
             const record = {
-              supplier: selectedSupplier || null,
-              category: category || null,
+              supplier: null,
               awbnumber: awbnumber || null,
-              productType: form.productType || null,
+              productType: productType.trim(),
+              destination: destination.trim(),
               shipper: shipper || null,
               products: products.length > 0 ? products : [],
-              netWeight: netWeight || '0.00',
-              totalWeight: totalWeight || '0.00',
-              tareWeight: form.tareWeight || '0.00',
-              paymentStatus: paymentStatus || 'Unpaid',
+              netWeight: calculateTotals.netWeight,
+              totalWeight: calculateTotals.totalWeight,
+              tareWeight: form.tareWeight,
+              paymentStatus,
               senderDetails: senderDetails || null,
               receiverDetails: receiverDetails || null,
               createdAt: new Date(),
@@ -266,8 +316,8 @@ const RecordPage = ({ route, navigation }) => {
               await saveToFirebase(record);
               await saveToLocalStorage(record);
               setModalVisible(true);
-            } catch (firebaseError) {
-              console.error('Firebase save error:', firebaseError);
+            } catch (error) {
+              console.error('Firebase save error:', error);
               await saveToLocalStorage(record);
               setModalVisible(true);
               setTimeout(() => {
@@ -290,11 +340,23 @@ const RecordPage = ({ route, navigation }) => {
         },
       },
     ]);
-  };
+  }, [
+    form,
+    awbnumber,
+    shipper,
+    products,
+    calculateTotals,
+    paymentStatus,
+    senderDetails,
+    receiverDetails,
+    BusinessId,
+    saveToFirebase,
+    saveToLocalStorage,
+  ]);
 
-  const syncLocalRecordsToFirebase = async () => {
+  const syncLocalRecordsToFirebase = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       const networkState = await Network.getNetworkStateAsync();
       if (!networkState.isConnected || !networkState.isInternetReachable) {
         Alert.alert('No Internet', 'Please connect to the internet to sync records.');
@@ -309,12 +371,10 @@ const RecordPage = ({ route, navigation }) => {
 
       const localRecords = JSON.parse(localRecordsJson);
       let syncedCount = 0;
-      let errorCount = 0;
 
       for (const record of localRecords) {
         try {
-          const recordsRef = collection(db, 'Records');
-          await addDoc(recordsRef, {
+          await addDoc(collection(db, 'Records'), {
             ...record,
             syncedAt: new Date(),
             userId: auth.currentUser?.uid || null,
@@ -323,17 +383,14 @@ const RecordPage = ({ route, navigation }) => {
           syncedCount++;
         } catch (error) {
           console.error('Error syncing record:', error);
-          errorCount++;
         }
       }
 
-      if (errorCount === 0 && syncedCount > 0) {
+      if (syncedCount === localRecords.length) {
         await AsyncStorage.removeItem('localRecords');
         ToastAndroid.show(`Successfully synced ${syncedCount} records to Firebase!`, ToastAndroid.LONG);
-      } else if (syncedCount > 0) {
-        ToastAndroid.show(`Synced ${syncedCount} records. ${errorCount} failed.`, ToastAndroid.LONG);
       } else {
-        ToastAndroid.show('Failed to sync records to Firebase', ToastAndroid.LONG);
+        ToastAndroid.show(`Synced ${syncedCount} of ${localRecords.length} records.`, ToastAndroid.LONG);
       }
     } catch (error) {
       console.error('Sync error:', error);
@@ -341,133 +398,154 @@ const RecordPage = ({ route, navigation }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [BusinessId]);
 
-  const showPrinterReceipt = async () => {
+  const showPrinterReceipt = useCallback(async () => {
     try {
-      const supplier = category || 'N/A';
-      const airweighbillnumber = awbnumber || 'Unknown';
-      const destinationLocation = form.destination || 'Unknown';
-      const tareweight = form.tareWeight || 'N/A';
-      const netweight = netWeight || 'N/A';
-      const ship = shipper || 'N/A';
-      const items = products || [];
-      const pmcNumber = form.pmcNumber || '';
-      const payment = paymentStatus || 'Unpaid';
-      const sender = senderDetails?.name || 'Unknown';
-      const receiver = receiverDetails?.name || 'Unknown';
+      const receiptData = [
+        '    ====== SCALESTECH =====\n\n',
+        ` Category: ${'N/A'.padEnd(10)}\n`,
+        ` ULD Number: ${(form.pmcNumber || '').padEnd(10)}\n`,
+        ` AWB: ${(awbnumber || 'Unknown').padEnd(10)}\n`,
+        ` Destination: ${(form.destination || 'Unknown').padEnd(10)}\n`,
+        ` Shipper: ${(shipper || 'N/A').padEnd(10)}\n`,
+        ` Sender: ${(senderDetails?.name || 'Unknown').padEnd(10)}\n`,
+        ` Receiver: ${(receiverDetails?.name || 'Unknown').padEnd(10)}\n`,
+        ` Payment: ${(paymentStatus || 'Unpaid').padEnd(10)}\n`,
+        ` Date:${new Date().toLocaleDateString().padEnd(9)} Time:${new Date().toLocaleTimeString()}\n\n`,
+        '---------- Products ---------\n',
+        'Item   Qty    wgt(Kg)    Dim(cm)  \n',
+        ...products.map((item) => {
+          const { label = item.productType || 'Unknown', quantity = 0, weight = 0, lt = 0, wd = 0, ht = 0 } = item;
+          return `${label.padEnd(8)} ${quantity.toString().padStart(2)} ${parseFloat(weight).toFixed(2).padStart(9)} ${`${lt}*${wd}*${ht}`.padStart(9)}\n`;
+        }),
+        '----------------------\n',
+        `GW:    ${calculateTotals.totalQuantity.toString().padStart(4)}   ${calculateTotals.totalWeight.padStart(8)} Kg\n\n`,
+        `Tare Weight: ${(form.tareWeight || '0.00').toString().padStart(6)} Kg\n`,
+        `Net Weight: ${calculateTotals.netWeight.toString().padStart(6)} Kg\n\n\n\n`,
+        '   Thank you for your business!\n',
+        '   ===========================\n\n\n',
+      ].join('');
 
-      let receiptData = '';
-      receiptData += '    ====== SCALESTECH =====\n\n';
-      receiptData += ` Category: ${supplier.padEnd(10, ' ')}\n`;
-      receiptData += ` ULD Number: ${pmcNumber.padEnd(10, ' ')}\n`;
-      receiptData += ` AWB: ${airweighbillnumber.padEnd(10, ' ')}\n`;
-      receiptData += ` Destination: ${destinationLocation.padEnd(10, ' ')}\n`;
-      receiptData += ` Shipper: ${ship.padEnd(10, '')} \n`;
-      receiptData += ` Sender: ${sender.padEnd(10, ' ')} \n`;
-      receiptData += ` Receiver: ${receiver.padEnd(10, ' ')} \n`;
-      receiptData += ` Payment: ${payment.padEnd(10, ' ')} \n`;
-      receiptData += ` Date:${new Date().toLocaleDateString().padEnd(9, ' ')} Time:${new Date().toLocaleTimeString()}\n\n`;
-      receiptData += '---------- Products ---------\n';
-      receiptData += 'Item   Qty    wgt(Kg)    Dim(cm)  \n';
-
-      let totalQuantity = 0;
-      let totalWeight = 0;
-      let totalVol = 0;
-
-      items.forEach((item) => {
-        const { label = item.productType || 'Unknown', quantity = 0, weight = 0, lt = 0, wd = 0, ht = 0, tVol = 0 } = item;
-        const qty = parseInt(quantity, 10);
-        const wgt = parseFloat(weight);
-        const tvol = parseFloat(tVol);
-        const dim = lt && wd && ht ? `${lt}*${wd}*${ht}` : 'N/A';
-
-        totalQuantity += qty;
-        totalWeight += wgt;
-        totalVol += tvol;
-
-        receiptData += `${label.padEnd(8, ' ')} ${qty.toString().padStart(2, ' ')} ${wgt.toFixed(2).padStart(9, ' ')} ${dim.padStart(9, ' ')}  \n`;
-      });
-
-      receiptData += '----------------------\n';
-      receiptData += `GW:    ${totalQuantity.toString().padStart(4, ' ')}   ${totalWeight.toFixed(2).padStart(8, ' ')} Kg    \n\n`;
-      receiptData += `Tare Weight: ${tareweight.toString().padStart(6, '')} Kg \n`;
-      receiptData += `Net Weight: ${netweight.toString().padStart(6, '')} Kg \n\n\n\n`;
-      receiptData += '   Thank you for your business!\n';
-      receiptData += '   ===========================\n';
-      receiptData += '\n\n\n';
-
-      const printer = store.getState().settings.printerAddress;
-      writeToDevice(printer, receiptData, 'ascii');
+      writeToDevice(store.getState().settings.printerAddress, receiptData, 'ascii');
     } catch (error) {
-      console.error('Error generating the receipt:', error);
+      console.error('Error generating receipt:', error);
+      ToastAndroid.show('Failed to generate receipt', ToastAndroid.SHORT);
     }
-  };
+  }, [awbnumber, shipper, senderDetails, receiverDetails, form, products, calculateTotals, paymentStatus]);
 
-  const handleDelete = (index) => {
-    Alert.alert('Confirm Deletion', 'Are you sure you want to delete this product?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        onPress: () => {
-          setProducts((prev) => prev.filter((_, i) => i !== index));
+  const handleDelete = useCallback(
+    (index) =>
+      Alert.alert('Confirm Deletion', 'Are you sure you want to delete this product?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          onPress: () => setProducts((prev) => prev.filter((_, i) => i !== index)),
+          style: 'destructive',
         },
-        style: 'destructive',
-      },
-    ]);
-  };
-
-  const renderProducts = useMemo(
-    () => products.map((item, index) => <ProductRow key={index} item={item} index={index} onDelete={handleDelete} />),
-    [products]
+      ]),
+    []
   );
 
-  const resetStability = () => {
+  const resetStability = useCallback(() => {
     recentReadingsRef.current = [];
-    setScaleData({
-      reading: null,
-      rawReading: null,
-      isStable: false,
-      lastUpdated: null,
-    });
+    setScaleData({ reading: null, rawReading: null, isStable: false, lastUpdated: null });
     ToastAndroid.show('Scale reset successfully', ToastAndroid.SHORT);
-  };
+  }, []);
+
+  const captureProduct = useCallback(() => {
+    if (!scaleData.isStable) {
+      ToastAndroid.show('Please wait for scale to stabilize', ToastAndroid.SHORT);
+      return;
+    }
+
+    console.log('Capturing product with scaleData:', scaleData);
+    Alert.alert(
+      'Confirm Capture',
+      `Are you sure you want to capture this product?\nWeight: ${scaleData.reading}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'OK',
+          onPress: () => {
+            const length = parseFloat(form.length) || 0;
+            const width = parseFloat(form.width) || 0;
+            const height = parseFloat(form.height) || 0;
+            const quantity = parseFloat(form.quantity) || 1;
+            const totalVolume = length * width * height * quantity;
+
+            if (scaleData.rawReading) {
+              setProducts((prev) => [
+                ...prev,
+                {
+                  quantity: form.quantity,
+                  weight: scaleData.rawReading.toFixed(2),
+                  productType: form.productType,
+                  tVol: totalVolume,
+                  ht: height,
+                  wd: width,
+                  lt: length,
+                },
+              ]);
+              console.log('Captured product weight:', scaleData.rawReading.toFixed(2));
+              setForm((prev) => ({
+                ...prev,
+                quantity: '',
+                length: '',
+                width: '',
+                height: '',
+              }));
+              ToastAndroid.show('Product captured successfully!', ToastAndroid.SHORT);
+            } else {
+              ToastAndroid.show('No valid weight reading', ToastAndroid.SHORT);
+            }
+          },
+        },
+      ]
+    );
+  }, [scaleData, form]);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#F9F9F9' }}>
-      <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      nestedScrollEnabled={true} // Enable nested scrolling to mitigate VirtualizedList conflict
+    >
+      <View style={styles.innerContainer}>
         <View style={styles.paymentStatusContainer}>
           <Text style={styles.paymentStatusText}>Payment Status: {paymentStatus}</Text>
         </View>
 
         <CustomButton
-          title={senderInfoVisible ? 'Hide Sender Info' : 'Show Sender Info'}
-          onPress={() => setSenderInfoVisible((prev) => !prev)}
+          title={infoVisibility.sender ? 'Hide Sender Info' : 'Show Sender Info'}
+          onPress={() => setInfoVisibility((prev) => ({ ...prev, sender: !prev.sender }))}
           style={styles.infoToggleButton}
           textStyle={styles.infoToggleText}
         />
-        {senderInfoVisible && (
+        {infoVisibility.sender && (
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Sender Information</Text>
-            <Text style={styles.infoText}>Name: {senderDetails?.name || 'N/A'}</Text>
-            <Text style={styles.infoText}>Phone: {senderDetails?.phone || 'N/A'}</Text>
-            <Text style={styles.infoText}>ID Number: {senderDetails?.idNumber || 'N/A'}</Text>
-            <Text style={styles.infoText}>Staff: {senderDetails?.staffName || 'N/A'}</Text>
+            {['name', 'phone', 'idNumber', 'staffName'].map((key) => (
+              <Text key={key} style={styles.infoText}>
+                {key.charAt(0).toUpperCase() + key.slice(1)}: {senderDetails?.[key] || 'N/A'}
+              </Text>
+            ))}
           </View>
         )}
 
         <CustomButton
-          title={receiverInfoVisible ? 'Hide Receiver Info' : 'Show Receiver Info'}
-          onPress={() => setReceiverInfoVisible((prev) => !prev)}
+          title={infoVisibility.receiver ? 'Hide Receiver Info' : 'Show Receiver Info'}
+          onPress={() => setInfoVisibility((prev) => ({ ...prev, receiver: !prev.receiver }))}
           style={styles.infoToggleButton}
           textStyle={styles.infoToggleText}
         />
-        {receiverInfoVisible && (
+        {infoVisibility.receiver && (
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Receiver Information</Text>
-            <Text style={styles.infoText}>Name: {receiverDetails?.name || 'N/A'}</Text>
-            <Text style={styles.infoText}>Phone: {receiverDetails?.phone || 'N/A'}</Text>
-            <Text style={styles.infoText}>ID Number: {receiverDetails?.idNumber || 'N/A'}</Text>
+            {['name', 'phone', 'idNumber'].map((key) => (
+              <Text key={key} style={styles.infoText}>
+                {key.charAt(0).toUpperCase() + key.slice(1)}: {receiverDetails?.[key] || 'N/A'}
+              </Text>
+            ))}
           </View>
         )}
 
@@ -475,208 +553,165 @@ const RecordPage = ({ route, navigation }) => {
           value={form.productType}
           onChange={(text) => updateForm('productType', text)}
           placeholder="Product Type"
-          style={styles.supplier}
         />
-        <InputField
-          value={form.destination}
-          onChange={(text) => updateForm('destination', text)}
-          placeholder="Destination"
-          style={styles.supplier}
-        />
+
+        <View style={styles.dropdownContainer}>
+          {loadingLocations ? (
+            <ActivityIndicator size="small" color="#2196F3" />
+          ) : (
+            <DropDownPicker
+              open={dropdownOpen}
+              value={form.destination}
+              items={dropdownItems}
+              setOpen={setDropdownOpen}
+              setValue={(callback) => {
+                const newValue = callback(form.destination);
+                updateForm('destination', newValue);
+              }}
+              style={styles.picker}
+              containerStyle={styles.pickerContainer}
+              dropDownContainerStyle={styles.dropdownStyle}
+              placeholder="Select Destination"
+              zIndex={3000}
+              zIndexInverse={1000}
+              nestedScrollEnabled={true} // Ensure DropDownPicker's internal list can scroll independently
+            />
+          )}
+        </View>
+
         <InputField
           value={form.quantity}
           onChange={(text) => updateForm('quantity', text)}
           placeholder="Quantity"
-          style={styles.supplier}
           keyboardType="numeric"
         />
+
         <View style={styles.dimView}>
-          <InputField
-            value={form.length}
-            onChange={(text) => updateForm('length', text)}
-            placeholder="Length (cm)"
-            style={styles.dimensions}
-            keyboardType="numeric"
-          />
-          <InputField
-            value={form.width}
-            onChange={(text) => updateForm('width', text)}
-            placeholder="Width (cm)"
-            style={styles.dimensions}
-            keyboardType="numeric"
-          />
-          <InputField
-            value={form.height}
-            onChange={(text) => updateForm('height', text)}
-            placeholder="Height (cm)"
-            style={styles.dimensions}
-            keyboardType="numeric"
-          />
+          {['length', 'width', 'height'].map((dim) => (
+            <InputField
+              key={dim}
+              value={form[dim]}
+              onChange={(text) => updateForm(dim, text)}
+              placeholder={`${dim.charAt(0).toUpperCase() + dim.slice(1)} (cm) - Optional`}
+              style={styles.dimensions}
+              keyboardType="numeric"
+            />
+          ))}
         </View>
+
         <CustomButton
           title="Add Tare Weight"
-          onPress={() => setDolleyVisible(true)}
+          onPress={() => setDolleyVisible((prev) => !prev)}
           style={styles.button}
         />
+
         {dolleyVisible && (
           <>
             <InputField
               value={form.tareWeight}
               onChange={(text) => updateForm('tareWeight', text)}
               placeholder="Tare Weight 0.00 kg (Optional)"
-              style={styles.supplier}
               keyboardType="numeric"
             />
             <InputField
               value={form.pmcNumber}
               onChange={(text) => updateForm('pmcNumber', text)}
               placeholder="ULD Number (Optional)"
-              style={styles.supplier}
             />
           </>
         )}
 
-        {modalVisible && (
-          <Modal
-            animationType="slide"
-            transparent={true}
-            visible={modalVisible}
-            onRequestClose={() => setModalVisible(false)}
-          >
-            <View style={styles.centeredView}>
-              <View style={styles.modalView}>
-                <View style={styles.modalNav}>
-                  <Text style={styles.touchableText}>Print Receipt</Text>
-                </View>
-                <View style={styles.modalContent}>
-                  <CustomButton
-                    title="Reconnect Printer"
-                    onPress={() => connectToDevice(store.getState().settings.printerAddress)}
-                    style={{ borderRadius: 20 }}
-                    textStyle={{ color: 'blue' }}
-                    icon={<AntDesign name="printer" size={34} color="blue" />}
-                  />
-                  <CustomButton title="Print" onPress={showPrinterReceipt} />
-                </View>
-              </View>
+        <Modal
+          animationType="slide"
+          transparent
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.centeredView}>
+            <View style={styles.modalView}>
+              <Text style={styles.modalTitle}>Print Receipt</Text>
+              <CustomButton
+                title="Reconnect Printer"
+                onPress={() => connectToDevice(store.getState().settings.printerAddress)}
+                style={styles.modalButton}
+                textStyle={styles.modalButtonText}
+                icon={<AntDesign name="printer" size={24} color="blue" />}
+              />
+              <CustomButton
+                title="Print"
+                onPress={showPrinterReceipt}
+                style={styles.modalButton}
+              />
+              <CustomButton
+                title="Close"
+                onPress={() => setModalVisible(false)}
+                style={[styles.modalButton, styles.closeButton]}
+              />
             </View>
-          </Modal>
-        )}
+          </View>
+        </Modal>
 
         <View
-          style={[styles.display, { backgroundColor: scaleData.isStable ? 'green' : 'red' }]}
+          style={[styles.scaleDisplay, { backgroundColor: scaleData.isStable ? '#4CAF50' : '#F44336' }]}
         >
-          <View style={styles.data}>
+          <View style={styles.scaleData}>
             <Text style={styles.textBold}>Connected Device:</Text>
             <Text style={styles.textRegular}>{receivedData ? 'Connected' : 'Disconnected'}</Text>
             <Text style={styles.textBold}>Scale Stability:</Text>
             <Text style={styles.textRegular}>{scaleData.isStable ? 'Stable' : 'Unstable'}</Text>
           </View>
-          <Text style={styles.textWeight}>{scaleData.reading}</Text>
+          <Text style={styles.textWeight}>{scaleData.reading || 'N/A'}</Text>
         </View>
 
         <CustomButton
           title={
             scaleData.isStable && scaleData.reading
-              ? `Capture (${scaleData.reading}kg)`
+              ? `Capture (${scaleData.reading})`
               : 'Waiting for stable reading...'
           }
-          onPress={() => {
-            if (!scaleData.isStable) {
-              ToastAndroid.show('Please wait for scale to stabilize', ToastAndroid.SHORT);
-              return;
-            }
-            Alert.alert(
-              'Confirm Capture',
-              `Are you sure you want to capture this product?\nWeight: ${scaleData.reading}kg`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'OK',
-                  onPress: () => {
-                    const totalvolume = form.height * form.width * form.length * form.quantity;
-                    const airlineCalc = totalvolume / 1;
-                    if (scaleData.reading) {
-                      setProducts((prevProducts) => [
-                        ...prevProducts,
-                        {
-                          ...form.productType,
-                          quantity: form.quantity,
-                          weight: scaleData.rawReading,
-                          productType: form.productType,
-                          tVol: airlineCalc,
-                          ht: form.height,
-                          wd: form.width,
-                          lt: form.length,
-                        },
-                      ]);
-                      ToastAndroid.show('Product captured successfully!', ToastAndroid.SHORT);
-                      setForm({
-                        productType: '',
-                        destination: form.destination,
-                        quantity: '',
-                        length: '',
-                        width: '',
-                        height: '',
-                        tareWeight: form.tareWeight,
-                        pmcNumber: form.pmcNumber,
-                      });
-                    } else {
-                      ToastAndroid.show('No valid weight reading', ToastAndroid.SHORT);
-                    }
-                  },
-                },
-              ]
-            );
-          }}
+          onPress={captureProduct}
           disabled={!scaleData.isStable}
-          style={{ backgroundColor: scaleData.isStable ? '#4CAF50' : '#CCCCCC' }}
-          textStyle={{ color: scaleData.isStable ? '#FFFFFF' : '#999999' }}
+          style={[styles.button, !scaleData.isStable && styles.buttonDisabled]}
         />
 
-<CustomButton
-    title="Reset Scale"
-    onPress={resetStability}
-    style={{ backgroundColor: '#FF5733' }}
-    textStyle={{ color: '#fff' }}
-  />
+        <CustomButton
+          title="Reset Scale"
+          onPress={resetStability}
+          style={[styles.button, styles.resetButton]}
+        />
 
         <View style={styles.preview}>
-          <ScrollView style={styles.scroll}>
-            <View style={styles.table}>
-              <Text style={styles.tableHeader}>Records</Text>
-              <View style={styles.tableRow}>
-                <Text style={styles.tableHeader}>Item</Text>
-                <Text style={styles.tableHeader}>Quantity</Text>
-                <Text style={styles.tableHeader}>Weight</Text>
-                <Text style={styles.tableHeader}>Dimensions</Text>
-                <Text style={styles.tableHeader}>Total-Vol</Text>
-              </View>
-              {renderProducts}
-              <View style={styles.totalRow}>
-                <Text style={styles.tableCell}>Total</Text>
-                <Text style={styles.tableCell}>{totalQuantity}</Text>
-                <Text style={styles.tableCell}>{totalWeight}kg</Text>
-                <Text style={styles.tableCell}>N/A</Text>
-                <Text style={styles.tableCell}>{totalVolume} cm³</Text>
-              </View>
+          <Text style={styles.tableHeader}>Records</Text>
+          <View style={styles.table}>
+            <View style={styles.tableRow}>
+              {['Item', 'Quantity', 'Weight', 'Dimensions', 'Total-Vol'].map((header) => (
+                <Text key={header} style={styles.tableHeaderCell}>{header}</Text>
+              ))}
             </View>
-          </ScrollView>
+            {products.map((item, index) => (
+              <ProductRow key={index} item={item} index={index} onDelete={handleDelete} />
+            ))}
+            <View style={styles.totalRow}>
+              <Text style={styles.tableCell}>Total</Text>
+              <Text style={styles.tableCell}>{calculateTotals.totalQuantity}</Text>
+              <Text style={styles.tableCell}>{calculateTotals.totalWeight}kg</Text>
+              <Text style={styles.tableCell}>N/A</Text>
+              <Text style={styles.tableCell}>{calculateTotals.totalVolume} cm³</Text>
+            </View>
+          </View>
         </View>
 
         <CustomButton
           title="Save Record"
           onPress={saveData}
           loading={loading}
-          style={{ backgroundColor: 'green' }}
-          textStyle={{ color: '#fff' }}
+          style={[styles.button, styles.saveButton]}
         />
         <CustomButton
           title="Sync to Firebase"
           onPress={syncLocalRecordsToFirebase}
           loading={loading}
-          style={{ backgroundColor: '#3498db' }}
-          textStyle={{ color: '#fff' }}
+          style={[styles.button, styles.syncButton]}
         />
       </View>
     </ScrollView>
@@ -686,17 +721,18 @@ const RecordPage = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
-    paddingTop: 10,
     backgroundColor: '#F9F9F9',
+  },
+  innerContainer: {
+    alignItems: 'center',
+    padding: 16,
   },
   paymentStatusContainer: {
     backgroundColor: '#f0f0f0',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    marginBottom: 15,
-    width: screenWidth * 0.8,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    width: '90%',
     alignItems: 'center',
   },
   paymentStatusText: {
@@ -706,24 +742,23 @@ const styles = StyleSheet.create({
   },
   infoToggleButton: {
     backgroundColor: '#E0E0E0',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    marginBottom: 10,
-    width: screenWidth * 0.8,
-    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    width: '90%',
   },
   infoToggleText: {
     fontSize: 14,
     fontFamily: 'Poppins-Medium',
     color: '#333',
+    textAlign: 'center',
   },
   infoContainer: {
     backgroundColor: '#F2F2F2',
     padding: 16,
-    borderRadius: 10,
-    marginBottom: 15,
-    width: screenWidth * 0.8,
+    borderRadius: 8,
+    marginBottom: 12,
+    width: '90%',
   },
   infoTitle: {
     fontSize: 16,
@@ -737,137 +772,165 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 4,
   },
-  display: {
-    height: 100,
-    width: screenWidth * 0.9,
-    borderRadius: 10,
-    flexDirection: 'row',
-    padding: 10,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+  input: {
+    padding: 12,
+    width: '90%',
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+    fontFamily: 'Poppins-Regular',
   },
-  data: {
-    flex: 1,
+  dropdownContainer: {
+    width: '90%',
+    marginBottom: 12,
   },
-  centeredView: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 22,
+  picker: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    backgroundColor: '#fff',
   },
-  supplier: {
-    padding: 10,
-    width: screenWidth * 0.8,
-    marginBottom: 5,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: 'grey',
+  pickerContainer: {
+    width: '100%',
+  },
+  dropdownStyle: {
+    backgroundColor: '#fff',
+    borderColor: '#ccc',
+    borderRadius: 8,
   },
   dimensions: {
-    padding: 10,
-    width: screenWidth * 0.2,
-    margin: 5,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: 'grey',
+    flex: 1,
+    marginHorizontal: 4,
   },
   dimView: {
     flexDirection: 'row',
+    width: '90%',
+    marginBottom: 12,
   },
-  modalView: {
-    margin: 20,
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 35,
-    width: screenWidth * 0.9,
+  scaleDisplay: {
+    width: '90%',
+    height: 100,
+    borderRadius: 8,
+    flexDirection: 'row',
+    padding: 16,
+    justifyContent: 'space-between',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    marginBottom: 12,
+  },
+  scaleData: {
+    flex: 1,
   },
   button: {
-    width: screenWidth * 0.9,
-    backgroundColor: '#F2F2F2',
-    paddingVertical: 12,
+    width: '90%',
+    backgroundColor: '#2196F3',
+    padding: 14,
+    borderRadius: 8,
     alignItems: 'center',
-    margin: 10,
-    borderRadius: 50,
+    marginBottom: 12,
   },
-  textButton: {
-    fontFamily: 'Poppins-Regular',
+  buttonDisabled: {
+    backgroundColor: '#B0BEC5',
+  },
+  buttonText: {
+    fontFamily: 'Poppins-Medium',
     fontSize: 16,
+    color: '#fff',
+  },
+  resetButton: {
+    backgroundColor: '#FF5733',
+  },
+  saveButton: {
+    backgroundColor: '#4CAF50',
+  },
+  syncButton: {
+    backgroundColor: '#3498db',
   },
   preview: {
-    height: 'auto',
+    width: '90%',
     backgroundColor: '#F2F2F2',
-    borderRadius: 10,
-    flex: 1,
-    width: screenWidth * 0.9,
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 5,
-    marginVertical: 10,
-  },
-  scroll: {
-    backgroundColor: 'white',
-    width: '100%',
-    borderRadius: 10,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
   },
   table: {
-    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 8,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#eee',
   },
   tableHeader: {
+    fontSize: 16,
+    fontFamily: 'Poppins-Bold',
+    padding: 12,
+    textAlign: 'center',
+  },
+  tableHeaderCell: {
     flex: 1,
-    padding: 10,
+    padding: 12,
     backgroundColor: '#f1f1f1',
-    fontWeight: 'bold',
+    fontFamily: 'Poppins-Bold',
     textAlign: 'center',
   },
   tableCell: {
     flex: 1,
-    padding: 10,
+    padding: 12,
     textAlign: 'center',
+    fontFamily: 'Poppins-Regular',
   },
   totalRow: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#eee',
     backgroundColor: '#f9f9f9',
   },
   textBold: {
     fontFamily: 'Poppins-Bold',
     fontSize: 14,
-    color: 'white',
+    color: '#fff',
   },
   textRegular: {
     fontFamily: 'Poppins-Regular',
     fontSize: 14,
-    color: 'white',
+    color: '#fff',
   },
   textWeight: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: 'Poppins-Medium',
     fontSize: 24,
-    color: 'white',
+    color: '#fff',
   },
-  modalNav: {
-    width: '100%',
+  centeredView: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
-  touchableText: {
+  modalView: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 24,
+    width: '90%',
+    alignItems: 'center',
+    elevation: 5,
+  },
+  modalTitle: {
     fontSize: 18,
     fontFamily: 'Poppins-Bold',
+    marginBottom: 16,
   },
-  modalContent: {
-    width: '100%',
-    alignItems: 'center',
+  modalButton: {
+    backgroundColor: '#2196F3',
+    marginBottom: 8,
+  },
+  modalButtonText: {
+    color: '#fff',
+  },
+  closeButton: {
+    backgroundColor: '#FF5733',
   },
 });
 

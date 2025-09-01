@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "WB eScale",
+    "owner":"scalestech",
+    "slug": "fcs",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "myapp",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/images/lg.png",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.scalestech.rwanda_air",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_ADMIN",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "../assets/images/lg.png"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "1d9738df-a473-418d-a6c6-3d66a8a51be7"
+      }
+    }
+  }
+}

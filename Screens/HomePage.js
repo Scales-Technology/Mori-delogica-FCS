@@ -78,10 +78,57 @@ const HomePage = () => {
             onPress: async () => {
               try {
                 for (const record of records) {
-                  // Ensure each record includes the payment status before uploading
+                  // Ensure all new fields are included in the record
                   const recordWithPayment = {
                     ...record,
                     paymentStatus: record.paymentStatus || paymentStatus,
+                    senderDetails: {
+                      name: record.senderDetails?.name || "",
+                      phone: record.senderDetails?.phone || "",
+                      idNumber: record.senderDetails?.idNumber || "",
+                      staffName: record.senderDetails?.staffName || "",
+                      location: record.senderDetails?.location || "",
+                      companyRepName:
+                        record.senderDetails?.companyRepName || "",
+                      jobTitle: record.senderDetails?.jobTitle || "",
+                      itemsFunctionality:
+                        record.senderDetails?.itemsFunctionality || "",
+                    },
+                    receiverDetails: {
+                      name: record.receiverDetails?.name || "",
+                      phone: record.receiverDetails?.phone || "",
+                      idNumber: record.receiverDetails?.idNumber || "",
+                      locationTown: record.receiverDetails?.locationTown || "",
+                      exactLocation:
+                        record.receiverDetails?.exactLocation || "",
+                    },
+                    deliveryInfo: {
+                      deliveryType:
+                        record.deliveryInfo?.deliveryType ||
+                        deliveryType ||
+                        "Same Day",
+                      deliveryDate:
+                        record.deliveryInfo?.deliveryDate ||
+                        deliveryDate ||
+                        "01/09/2025",
+                      additionalCharges:
+                        record.deliveryInfo?.additionalCharges ||
+                        additionalCharges ||
+                        "0",
+                      vat: record.deliveryInfo?.vat || vat || "0",
+                      totalAmount:
+                        record.deliveryInfo?.totalAmount ||
+                        totalAmount ||
+                        "514600",
+                      specialInstructions:
+                        record.deliveryInfo?.specialInstructions ||
+                        specialInstructions ||
+                        "",
+                      driversName:
+                        record.deliveryInfo?.driversName ||
+                        driversName ||
+                        "Test Driver",
+                    },
                   };
                   await addDoc(collection(db, "records"), recordWithPayment);
                 }

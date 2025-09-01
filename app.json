@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "WB eScale",
-    "owner":"scalestech",
-    "slug": "fcs",
+    "name": "Mori Delogica",
+    "owner": "lynne123",
+    "slug": "mori_delogica",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
-    "icon": "./assets/images/lg.png",
+    "icon": "./assets/images/mori-logo.png",
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "package": "com.scalestech.rwanda_air",
+      "package": "com.scalestech.mori_delogica",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -40,7 +40,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "1d9738df-a473-418d-a6c6-3d66a8a51be7"
+        "projectId": "ced0f43a-93c3-4a82-882e-b4f015c34e8f"
       }
     }
   }

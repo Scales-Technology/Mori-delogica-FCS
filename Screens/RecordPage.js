@@ -40,6 +40,7 @@ const RecordPage = ({ route, navigation }) => {
     paymentInfo,
     senderDetails,
     receiverDetails,
+    deliveryInfo,
   } = route.params;
   const dispatch = useDispatch();
   const collections = useSelector((state) => state.settings.collections);
@@ -68,7 +69,6 @@ const RecordPage = ({ route, navigation }) => {
   const [totalVolume, setTotalVolume] = useState(null);
   const [pmcnumber, setPmcNumber] = useState(null);
   const [userDetails, setUserDetails] = useState(null);
-  // Extract payment status from the navigation params
   const [paymentStatus, setPaymentStatus] = useState(
     paymentInfo?.status || "Unpaid"
   );
@@ -144,7 +144,6 @@ const RecordPage = ({ route, navigation }) => {
     if (receivedData) {
       const parsedData = parseBluetoothData(receivedData);
 
-      // Ensure parsedData.reading is not null before proceeding
       if (
         parsedData.reading !== null &&
         JSON.stringify(parsedData) !== JSON.stringify(scaleData)
@@ -171,13 +170,10 @@ const RecordPage = ({ route, navigation }) => {
     );
 
     const newNetWeight = newTotalWeight - parseFloat(tareWeight);
-    // const newTotalPrice = newTotalWeight * product.price;
     setTotalQuantity(newTotalQuantity);
     setTotalWeight(newTotalWeight.toFixed(2));
     setNetWeight(newNetWeight.toFixed(2));
     setTotalVolume(newTotalVolume.toFixed(1));
-
-    // setTotalPrice(newTotalPrice.toFixed(2));
   }, [products]);
 
   const parseBluetoothData = (data) => {
@@ -185,9 +181,7 @@ const RecordPage = ({ route, navigation }) => {
 
     let numericValue = null;
 
-    // Try to extract a numeric value from the data
     if (typeof data === "string") {
-      // First, try to decode if it's base64 encoded
       try {
         const decodedData = atob(data);
         const match = decodedData.match(/-?\d+(\.\d+)?/);
@@ -195,32 +189,25 @@ const RecordPage = ({ route, navigation }) => {
           numericValue = parseFloat(match[0]);
         }
       } catch (error) {
-        // If decoding fails, it's not base64, so we'll try to extract numbers directly
         const match = data.match(/-?\d+(\.\d+)?/);
         if (match) {
-          console.log("value", match);
           numericValue = parseFloat(match[0]);
         }
       }
     } else if (typeof data === "number") {
-      console.log("test", data);
       numericValue = data;
     }
 
-    // If we found a valid numeric value, return it with 'kg' appended
     if (numericValue !== null) {
-      console.log("Check1", numericValue);
-
       return {
         reading: numericValue.toFixed(2) + "kg",
-        isStable: true, // Always set to true as per requirement
+        isStable: true,
       };
     }
 
-    // If no valid numeric value was found, return null reading
     return {
       reading: null,
-      isStable: true, // Always set to true as per requirement
+      isStable: true,
     };
   };
 
@@ -242,8 +229,9 @@ const RecordPage = ({ route, navigation }) => {
       totalWeight,
       tareWeight,
       paymentStatus,
-      senderDetails, // Add sender details to the record
-      receiverDetails, // Add receiver details to the record
+      senderDetails,
+      receiverDetails,
+      deliveryInfo,
       createdAt: new Date(),
     };
 
@@ -254,15 +242,12 @@ const RecordPage = ({ route, navigation }) => {
       await AsyncStorage.setItem("localRecords", JSON.stringify(records));
       ToastAndroid.show("Record saved locally!", ToastAndroid.LONG);
       setModalVisible(true);
-      // Reset Data
     } catch (error) {
       alert("Error saving record locally: " + error.message);
     }
   };
 
   const saveData = async () => {
-    console.log("test", category);
-
     if (category && destination && selectedProductType) {
       Alert.alert(
         "Confirm Save",
@@ -285,11 +270,8 @@ const RecordPage = ({ route, navigation }) => {
     }
   };
   const showPrinterReceipt = async () => {
-    console.log("DDATA:", selectedSupplier);
     try {
-      // Ensure these variables are defined
       const supplier = category || "N/A";
-      const airweighbillnumber = awbnumber || "Unknown";
       const destinationLocation = destination || "Unknown";
       const tareweight = tareWeight || "N/A";
       const netweight = netWeight || "N/A";
@@ -298,22 +280,56 @@ const RecordPage = ({ route, navigation }) => {
       const separator = "----------------------\n";
       const pmcNumber = pmcnumber || "";
       const payment = paymentStatus || "Unpaid";
-      const sender = senderDetails?.name || "Unknown";
-      const receiver = receiverDetails?.name || "Unknown";
-      // const userDt = userDetails.Name || "Unknown"
+      const senderName = senderDetails?.name || "Unknown";
+      const senderLocation = senderDetails?.location || "N/A";
+      const companyRepName = senderDetails?.companyRepName || "N/A";
+      const jobTitle = senderDetails?.jobTitle || "N/A";
+      const itemsFunctionality = senderDetails?.itemsFunctionality || "N/A";
+      const receiverName = receiverDetails?.name || "Unknown";
+      const receiverLocationTown = receiverDetails?.locationTown || "N/A";
+      const receiverExactLocation = receiverDetails?.exactLocation || "N/A";
+      const deliveryDate = deliveryInfo?.deliveryDate || "N/A";
+      const totalAmount = deliveryInfo?.totalAmount || "0";
+      const vat = deliveryInfo?.vat || "0";
+      const additionalCharges = deliveryInfo?.additionalCharges || "0";
+      const specialInstructions = deliveryInfo?.specialInstructions || "N/A";
 
-      // Initialize receipt data
       let receiptData = "";
-      receiptData += "    ====== SCALESTECH =====\n\n";
+      receiptData += "    ====== MORI DELOGICA =====\n\n";
       receiptData += ` Category: ${supplier.padEnd(10, " ")}\n`;
-      receiptData += ` ULD Number: ${pmcNumber.padEnd(10, " ")}\n`;
-      receiptData += ` AWB: ${airweighbillnumber.padEnd(10, " ")}\n`;
       receiptData += ` Destination: ${destinationLocation.padEnd(10, " ")}\n`;
-      receiptData += ` Shipper: ${ship.padEnd(10, "")} \n`;
-      receiptData += ` Sender: ${sender.padEnd(10, " ")} \n`;
-      receiptData += ` Receiver: ${receiver.padEnd(10, " ")} \n`;
-      receiptData += ` Payment: ${payment.padEnd(10, " ")} \n`;
-      // receiptData += `  Printed by: ${userDt.padEnd(10, ' ')}\n`;
+      receiptData += "\n--- Sender Information ---\n";
+      receiptData += ` Name: ${senderName.padEnd(10, " ")}\n`;
+      receiptData += ` Location: ${senderLocation.padEnd(10, " ")}\n`;
+      receiptData += ` Company Rep: ${companyRepName.padEnd(10, " ")}\n`;
+      receiptData += ` Job Title: ${jobTitle.padEnd(10, " ")}\n`;
+      receiptData += ` Items Functionality: ${itemsFunctionality.padEnd(
+        10,
+        " "
+      )}\n`;
+      receiptData += "\n--- Receiver Information ---\n";
+      receiptData += ` Name: ${receiverName.padEnd(10, " ")}\n`;
+      receiptData += ` Town: ${receiverLocationTown.padEnd(10, " ")}\n`;
+      receiptData += ` Exact Location: ${receiverExactLocation.padEnd(
+        10,
+        " "
+      )}\n`;
+      receiptData += "\n--- Delivery Information ---\n";
+      receiptData += ` Delivery Date: ${deliveryDate.padEnd(10, " ")}\n`;
+      receiptData += ` VAT: ${vat.padEnd(10, " ")}\n`;
+      receiptData += ` Additional Charges: ${additionalCharges.padEnd(
+        10,
+        " "
+      )}\n`;
+      receiptData += ` Special Instructions: ${specialInstructions.padEnd(
+        10,
+        " "
+      )}\n`;
+       receiptData += `Total Amount: ${totalAmount.padStart(
+         6,
+         " "
+       )}\n`;
+      receiptData += `Payment Status: ${payment.padEnd(10, " ")}\n`;
       receiptData += ` Date:${new Date()
         .toLocaleDateString()
         .padEnd(9, " ")} Time:${new Date().toLocaleTimeString()}\n\n`;
@@ -337,7 +353,6 @@ const RecordPage = ({ route, navigation }) => {
           ht = 0,
           tVol = 0,
         } = item;
-        // const pName = productName;
         const qty = parseInt(quantity, 10);
         const wgt = parseFloat(weight);
         const prc = parseFloat(price);
@@ -358,7 +373,6 @@ const RecordPage = ({ route, navigation }) => {
       });
 
       receiptData += separator;
-      // receiptData += `GW:    ${totalQuantity.toString().padStart(4, ' ')}   ${totalWeight.toFixed(2).padStart(8, ' ')} Kg    ${totalVol.toFixed(2).padStart(12, ' ')} cm3  \n\n`;
       receiptData += `GW:    ${totalQuantity
         .toString()
         .padStart(4, " ")}   ${totalWeight
@@ -369,28 +383,27 @@ const RecordPage = ({ route, navigation }) => {
         .padStart(6, "")} Kg \n`;
       receiptData += `Net Weight: ${netweight
         .toString()
-        .padStart(6, "")} Kg \n\n\n\n`;
+        .padStart(6, "")} Kg \n`;
+     
       receiptData += "   Thank you for your business!\n";
       receiptData += "   ===========================\n";
       receiptData += "\nPayment Details:\n";
       receiptData += ` M-Pesa PayBill No: 953317\n`;
       receiptData += ` Account No: 514600\n`;
       receiptData += ` Status: ${paymentStatus}\n`;
-      receiptData += "\n\n\n"; // Extra lines for printer feed
+      receiptData += "\n\n\n";
 
-      console.log(receiptData); // For debugging
+      console.log(receiptData);
 
       const printer = store.getState().settings.printerAddress;
       writeToDevice(printer, receiptData, "ascii");
       console.log("Receipt sent to the printer");
-      //navigation.navigate("HomePage")
     } catch (error) {
       console.error("Error generating the receipt:", error);
     }
   };
 
   const handleChange = (text) => {
-    // Regex to match numbers with up to two decimal places
     const validNumber = text.match(/^\d*\.?\d{0,2}$/);
     if (validNumber) {
       setSelectedSupplier(text);
@@ -422,14 +435,12 @@ const RecordPage = ({ route, navigation }) => {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: "#F9F9F9" }}>
       <View style={styles.container}>
-        {/* Display payment status */}
         <View style={styles.paymentStatusContainer}>
           <Text style={styles.paymentStatusText}>
             Payment Status: {paymentStatus}
           </Text>
         </View>
 
-        {/* Sender Info Toggle Button */}
         <TouchableOpacity
           style={styles.infoToggleButton}
           onPress={toggleSenderInfo}
@@ -439,7 +450,6 @@ const RecordPage = ({ route, navigation }) => {
           </Text>
         </TouchableOpacity>
 
-        {/* Sender Info Display */}
         {senderInfoVisible && (
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Sender Information</Text>
@@ -455,10 +465,21 @@ const RecordPage = ({ route, navigation }) => {
             <Text style={styles.infoText}>
               Staff: {senderDetails?.staffName || "N/A"}
             </Text>
+            <Text style={styles.infoText}>
+              Location: {senderDetails?.location || "N/A"}
+            </Text>
+            <Text style={styles.infoText}>
+              Company Rep: {senderDetails?.companyRepName || "N/A"}
+            </Text>
+            <Text style={styles.infoText}>
+              Job Title: {senderDetails?.jobTitle || "N/A"}
+            </Text>
+            <Text style={styles.infoText}>
+              Items Functionality: {senderDetails?.itemsFunctionality || "N/A"}
+            </Text>
           </View>
         )}
 
-        {/* Receiver Info Toggle Button */}
         <TouchableOpacity
           style={styles.infoToggleButton}
           onPress={toggleReceiverInfo}
@@ -468,7 +489,6 @@ const RecordPage = ({ route, navigation }) => {
           </Text>
         </TouchableOpacity>
 
-        {/* Receiver Info Display */}
         {receiverInfoVisible && (
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Receiver Information</Text>
@@ -480,6 +500,12 @@ const RecordPage = ({ route, navigation }) => {
             </Text>
             <Text style={styles.infoText}>
               ID Number: {receiverDetails?.idNumber || "N/A"}
+            </Text>
+            <Text style={styles.infoText}>
+              Town: {receiverDetails?.locationTown || "N/A"}
+            </Text>
+            <Text style={styles.infoText}>
+              Exact Location: {receiverDetails?.exactLocation || "N/A"}
             </Text>
           </View>
         )}
@@ -546,13 +572,6 @@ const RecordPage = ({ route, navigation }) => {
           </>
         )}
 
-        {/* <TextInput
-        value={selectedSupplier}
-        onChangeText={handleChange}
-        placeholder="Tare Weight (0.00) kg"
-        style={styles.supplier}
-        keyboardType="numeric" // Optional: Brings up numeric keyboard on mobile
-      /> */}
         <Modal
           animationType="slide"
           transparent={true}
@@ -624,7 +643,6 @@ const RecordPage = ({ route, navigation }) => {
                   text: "OK",
                   onPress: () => {
                     const totalvolume = height * width * length * pquantity;
-                    // const airlineCalc = totalvolume / 6000;
                     const airlineCalc = totalvolume / 1;
                     if (scaleData.reading) {
                       setProducts((prevProducts) => [

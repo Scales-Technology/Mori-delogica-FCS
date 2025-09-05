@@ -12,7 +12,7 @@ const Header = ({ refresh, handleClick }) => {
 
   return (
     <View style={styles.headingContainer}>
-      <Text style={styles.heading}>Welcome ✈️</Text>
+      <Text style={styles.heading}>Launch into Parcel Management 📦</Text>
       <TouchableOpacity disabled={refresh} onPress={handleClick}>
         <AntDesign name="reload1" size={24} color="black" />
       </TouchableOpacity>

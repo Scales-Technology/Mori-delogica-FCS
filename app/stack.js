@@ -23,7 +23,7 @@ export const TabLayout = () => {
       tabBar={(props) => <CustomTabBar {...props} />}
     >
       <Tab.Screen name="HomePage" component={HomePage} />
-      <Tab.Screen name="DataPage" component={DataPage} />
+      {/* <Tab.Screen name="DataPage" component={DataPage} /> */}
       <Tab.Screen name="SettingsPage" component={SettingsPage} />
     </Tab.Navigator>
   );

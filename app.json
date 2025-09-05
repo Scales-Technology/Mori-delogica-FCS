@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mori Delogica",
     "owner": "lynne123",
-    "slug": "mori_delogica",
+    "slug": "mori-logistics-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "myapp",
@@ -12,7 +12,7 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.scalestech.mori_delogica",
+      "package": "com.lynne123.mori_delogica",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -40,7 +40,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "ced0f43a-93c3-4a82-882e-b4f015c34e8f"
+        "projectId": "fdc8d379-083d-4e59-98ba-95be78c49727"
       }
     }
   }

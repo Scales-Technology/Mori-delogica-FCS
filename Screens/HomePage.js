@@ -61,8 +61,16 @@ const HomePage = () => {
 
   const pushRecordsToFirebase = async () => {
     try {
+      console.log("Fetching local records from AsyncStorage...");
       const existingRecords = await AsyncStorage.getItem("localRecords");
       const records = existingRecords ? JSON.parse(existingRecords) : [];
+      console.log("Local records fetched:", records);
+
+      if (records.length === 0) {
+        console.log("No local records to synchronize.");
+        ToastAndroid.show("No records to synchronize!", ToastAndroid.LONG);
+        return;
+      }
 
       Alert.alert(
         "Confirm Upload",
@@ -77,11 +85,13 @@ const HomePage = () => {
             text: "OK",
             onPress: async () => {
               try {
+                console.log("Synchronizing records to Firestore...");
                 for (const record of records) {
-                  // Ensure all new fields are included in the record
+                  // Sanitize record to ensure Firestore compatibility
                   const recordWithPayment = {
                     ...record,
-                    paymentStatus: record.paymentStatus || paymentStatus,
+                    paymentStatus:
+                      record.paymentStatus || paymentStatus || "Unpaid",
                     senderDetails: {
                       name: record.senderDetails?.name || "",
                       phone: record.senderDetails?.phone || "",
@@ -129,15 +139,33 @@ const HomePage = () => {
                         driversName ||
                         "Test Driver",
                     },
+                    timestamp: new Date(),
                   };
-                  await addDoc(collection(db, "records"), recordWithPayment);
+                  console.log(
+                    "Pushing record to Firestore:",
+                    JSON.stringify(recordWithPayment, null, 2)
+                  );
+                  const docRef = await addDoc(
+                    collection(db, "records"),
+                    recordWithPayment
+                  );
+                  console.log(
+                    "Record successfully pushed to Firestore with ID:",
+                    docRef.id
+                  );
                 }
                 await AsyncStorage.removeItem("localRecords");
+                console.log("Local records cleared after successful sync.");
                 ToastAndroid.show(
                   "Records pushed to Firebase successfully!",
                   ToastAndroid.LONG
                 );
               } catch (error) {
+                console.error("Error pushing records to Firestore:", {
+                  message: error.message,
+                  code: error.code,
+                  stack: error.stack,
+                });
                 alert("Error pushing records to Firebase: " + error.message);
               }
             },
@@ -146,12 +174,66 @@ const HomePage = () => {
         { cancelable: false }
       );
     } catch (error) {
+      console.error("Error fetching local data:", {
+        message: error.message,
+        code: error.code,
+        stack: error.stack,
+      });
       alert("Error fetching local data: " + error.message);
     }
   };
 
   const handleStart = () => {
+    // Validate required fields
+    if (!selectedCategory || !senderName || !receiverName || !productName) {
+      console.warn("Validation failed: Missing required fields", {
+        selectedCategory,
+        senderName,
+        receiverName,
+        productName,
+      });
+      alert(
+        "Please fill in all required fields (Category, Sender Name, Receiver Name, Product Name)."
+      );
+      return;
+    }
+
     navigation.navigate("RecordPage", {
+      category: selectedCategory ? selectedCategory.Name : "Default Category",
+      senderDetails: {
+        name: senderName || "",
+        phone: senderPhone || "",
+        idNumber: senderIDNo || "",
+        staffName: staffName || "",
+        location: senderLocation || "",
+        companyRepName: companyRepName || "",
+        jobTitle: jobTitle || "",
+        itemsFunctionality: itemsFunctionality || "",
+      },
+      receiverDetails: {
+        name: receiverName || "",
+        phone: receiverPhone || "",
+        idNumber: receiverIDNo || "",
+        locationTown: receiverLocationTown || "",
+        exactLocation: receiverExactLocation || "",
+      },
+      productDetails: {
+        name: productName || "Test Product",
+      },
+      paymentInfo: {
+        status: paymentStatus,
+      },
+      deliveryInfo: {
+        deliveryType: deliveryType || "Same Day",
+        deliveryDate: deliveryDate || "01/09/2025",
+        additionalCharges: additionalCharges || "0",
+        vat: vat || "0",
+        totalAmount: totalAmount || "514600",
+        specialInstructions: specialInstructions || "",
+        driversName: driversName || "Test Driver",
+      },
+    });
+    console.log("Navigating to RecordPage with parameters:", {
       category: selectedCategory ? selectedCategory.Name : "Default Category",
       senderDetails: {
         name: senderName || "",

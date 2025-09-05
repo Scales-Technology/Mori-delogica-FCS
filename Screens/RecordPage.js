@@ -35,7 +35,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const RecordPage = ({ route, navigation }) => {
   const {
     category,
-    awbnumber,
     shipper,
     paymentInfo,
     senderDetails,
@@ -54,7 +53,6 @@ const RecordPage = ({ route, navigation }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
-  const [destination, setDestination] = useState(null);
   const [pquantity, setQuantity] = useState(null);
   const [netWeight, setNetWeight] = useState(false);
   const [totalQuantity, setTotalQuantity] = useState(0);
@@ -81,17 +79,26 @@ const RecordPage = ({ route, navigation }) => {
     const fetchUserDetails = async () => {
       try {
         const userId = auth.currentUser.uid;
+        console.log("Fetching user details for user ID:", userId);
         const userDocRef = doc(db, "User", userId);
         const userDoc = await getDoc(userDocRef);
 
         if (userDoc.exists()) {
-          setUserDetails(userDoc.data());
-          console.log(userDetails);
+          const userData = userDoc.data();
+          console.log("User details fetched successfully:", userData);
+          setUserDetails(userData);
         } else {
-          console.log("User does not exist in Firestore");
+          console.log(
+            "No user document found in Firestore for user ID:",
+            userId
+          );
         }
       } catch (error) {
-        console.error("Error fetching user details: ", error);
+        console.error("Error fetching user details:", {
+          message: error.message,
+          code: error.code,
+          stack: error.stack,
+        });
       } finally {
         setLoading(false);
       }
@@ -103,14 +110,21 @@ const RecordPage = ({ route, navigation }) => {
   useEffect(() => {
     const fetchDolleyCategories = async () => {
       try {
+        console.log("Fetching dolley categories from Firestore...");
         const querySnapshot = await getDocs(collection(db, "DolleyCategory"));
         const categories = [];
         querySnapshot.forEach((doc) => {
-          categories.push({ id: doc.id, ...doc.data() });
+          const categoryData = { id: doc.id, ...doc.data() };
+          categories.push(categoryData);
         });
+        console.log("Dolley categories fetched successfully:", categories);
         setDolleyCategories(categories);
       } catch (error) {
-        console.error("Error fetching dolley categories: ", error);
+        console.error("Error fetching dolley categories:", {
+          message: error.message,
+          code: error.code,
+          stack: error.stack,
+        });
       }
     };
 
@@ -157,19 +171,19 @@ const RecordPage = ({ route, navigation }) => {
 
   useEffect(() => {
     const newTotalQuantity = products.reduce(
-      (acc, item) => acc + parseInt(item.quantity),
+      (acc, item) => acc + parseInt(item.quantity || 0),
       0
     );
     const newTotalWeight = products.reduce(
-      (acc, item) => acc + parseFloat(item.weight),
+      (acc, item) => acc + parseFloat(item.weight || 0),
       0
     );
     const newTotalVolume = products.reduce(
-      (acc, item) => acc + parseFloat(item.tVol),
+      (acc, item) => acc + parseFloat(item.tVol || 0),
       0
     );
 
-    const newNetWeight = newTotalWeight - parseFloat(tareWeight);
+    const newNetWeight = newTotalWeight - parseFloat(tareWeight || 0);
     setTotalQuantity(newTotalQuantity);
     setTotalWeight(newTotalWeight.toFixed(2));
     setNetWeight(newNetWeight.toFixed(2));
@@ -219,36 +233,71 @@ const RecordPage = ({ route, navigation }) => {
 
   const saveDataLocally = async () => {
     const record = {
-      selectedSupplier,
-      category,
-      awbnumber,
-      selectedProductType,
-      shipper,
-      products,
-      netWeight,
-      totalWeight,
-      tareWeight,
-      paymentStatus,
-      senderDetails,
-      receiverDetails,
-      deliveryInfo,
+      selectedSupplier: selectedSupplier || null,
+      category: category || "N/A",
+      selectedProductType: selectedProductType || null,
+      shipper: shipper || "N/A",
+      products: products.map((product) => ({
+        quantity: product.quantity || "0",
+        weight: product.weight || 0,
+        productType: product.productType || "Unknown",
+        tVol: product.tVol || 0,
+        ht: product.ht || null,
+        wd: product.wd || null,
+        lt: product.lt || null,
+      })),
+      netWeight: netWeight || "0.00",
+      totalWeight: totalWeight || "0.00",
+      tareWeight: tareWeight || 0,
+      paymentStatus: paymentStatus || "Unpaid",
+      senderDetails: senderDetails || {},
+      receiverDetails: receiverDetails || {},
+      deliveryInfo: deliveryInfo || {},
       createdAt: new Date(),
+      userId: auth.currentUser?.uid || "unknown",
     };
 
     try {
+      console.log("Preparing to save record:", JSON.stringify(record, null, 2));
+
+      if (!record.selectedProductType) {
+        console.warn(
+          "Product type is missing or null. Using default value: null"
+        );
+      }
+      if (!record.category) {
+        console.warn("Category is missing or null. Using default value: N/A");
+      }
+
+      console.log("Saving record to AsyncStorage...");
       const existingRecords = await AsyncStorage.getItem("localRecords");
       const records = existingRecords ? JSON.parse(existingRecords) : [];
       records.push(record);
       await AsyncStorage.setItem("localRecords", JSON.stringify(records));
-      ToastAndroid.show("Record saved locally!", ToastAndroid.LONG);
+      console.log("Record successfully saved to AsyncStorage:", record);
+
+      console.log("Attempting to save record to Firestore...");
+      const docRef = await addDoc(collection(db, "Records"), {
+        ...record,
+        timestamp: new Date(),
+      });
+      console.log("Record successfully saved to Firestore with ID:", docRef.id);
+
+      ToastAndroid.show("Record saved successfully!", ToastAndroid.LONG);
       setModalVisible(true);
     } catch (error) {
-      alert("Error saving record locally: " + error.message);
+      console.error("Error saving record:", {
+        message: error.message,
+        code: error.code,
+        stack: error.stack,
+        record: JSON.stringify(record, null, 2),
+      });
+      alert("Error saving record: " + error.message);
     }
   };
 
   const saveData = async () => {
-    if (category && destination && selectedProductType) {
+    if (category && selectedProductType) {
       Alert.alert(
         "Confirm Save",
         "Are you sure you want to save this record?",
@@ -266,13 +315,17 @@ const RecordPage = ({ route, navigation }) => {
         { cancelable: false }
       );
     } else {
-      alert("Please select all fields before saving.");
+      console.warn("Validation failed: Missing required fields", {
+        category,
+        selectedProductType,
+      });
+      alert("Please select all required fields (Category, Product Type).");
     }
   };
+
   const showPrinterReceipt = async () => {
     try {
       const supplier = category || "N/A";
-      const destinationLocation = destination || "Unknown";
       const tareweight = tareWeight || "N/A";
       const netweight = netWeight || "N/A";
       const ship = shipper || "N/A";
@@ -297,7 +350,6 @@ const RecordPage = ({ route, navigation }) => {
       let receiptData = "";
       receiptData += "    ====== MORI DELOGICA =====\n\n";
       receiptData += ` Category: ${supplier.padEnd(10, " ")}\n`;
-      receiptData += ` Destination: ${destinationLocation.padEnd(10, " ")}\n`;
       receiptData += "\n--- Sender Information ---\n";
       receiptData += ` Name: ${senderName.padEnd(10, " ")}\n`;
       receiptData += ` Location: ${senderLocation.padEnd(10, " ")}\n`;
@@ -325,10 +377,7 @@ const RecordPage = ({ route, navigation }) => {
         10,
         " "
       )}\n`;
-       receiptData += `Total Amount: ${totalAmount.padStart(
-         6,
-         " "
-       )}\n`;
+      receiptData += `Total Amount: ${totalAmount.padStart(6, " ")}\n`;
       receiptData += `Payment Status: ${payment.padEnd(10, " ")}\n`;
       receiptData += ` Date:${new Date()
         .toLocaleDateString()
@@ -384,7 +433,7 @@ const RecordPage = ({ route, navigation }) => {
       receiptData += `Net Weight: ${netweight
         .toString()
         .padStart(6, "")} Kg \n`;
-     
+
       receiptData += "   Thank you for your business!\n";
       receiptData += "   ===========================\n";
       receiptData += "\nPayment Details:\n";
@@ -517,12 +566,6 @@ const RecordPage = ({ route, navigation }) => {
           style={styles.supplier}
         />
         <TextInput
-          value={destination}
-          onChangeText={(text) => setDestination(text)}
-          placeholder="Destination"
-          style={styles.supplier}
-        />
-        <TextInput
           value={pquantity}
           onChangeText={(text) => setQuantity(text)}
           placeholder="Quantity"
@@ -587,7 +630,7 @@ const RecordPage = ({ route, navigation }) => {
               </View>
               <View style={styles.modalContent}>
                 <TouchableOpacity
-                  style={[, styles.button, { borderRadius: 20 }]}
+                  style={[styles.button, { borderRadius: 20 }]}
                   onPress={handleSwitchBt}
                 >
                   <AntDesign name="printer" size={34} color="blue" />
@@ -642,20 +685,23 @@ const RecordPage = ({ route, navigation }) => {
                 {
                   text: "OK",
                   onPress: () => {
-                    const totalvolume = height * width * length * pquantity;
+                    const totalvolume =
+                      (height || 0) *
+                      (width || 0) *
+                      (length || 0) *
+                      (pquantity || 0);
                     const airlineCalc = totalvolume / 1;
                     if (scaleData.reading) {
                       setProducts((prevProducts) => [
                         ...prevProducts,
                         {
-                          ...selectedProductType,
-                          quantity: pquantity,
-                          weight: parseFloat(scaleData.reading),
-                          productType: selectedProductType,
-                          tVol: airlineCalc,
-                          ht: height,
-                          wd: width,
-                          lt: length,
+                          quantity: pquantity || "0",
+                          weight: parseFloat(scaleData.reading) || 0,
+                          productType: selectedProductType || "Unknown",
+                          tVol: airlineCalc || 0,
+                          ht: height || null,
+                          wd: width || null,
+                          lt: length || null,
                         },
                       ]);
                     } else {
@@ -694,9 +740,9 @@ const RecordPage = ({ route, navigation }) => {
                   <Text style={styles.tableCell}>{item.productType}</Text>
                   <Text style={styles.tableCell}>{item.quantity}</Text>
                   <Text style={styles.tableCell}>{item.weight}kg</Text>
-                  <Text
-                    style={styles.tableCell}
-                  >{`${item.lt}*${item.wd}*${item.ht}`}</Text>
+                  <Text style={styles.tableCell}>{`${item.lt || "N/A"}*${
+                    item.wd || "N/A"
+                  }*${item.ht || "N/A"}`}</Text>
                   <Text style={styles.tableCell}>
                     {item.tVol.toFixed(1)} cm&#179;
                   </Text>
